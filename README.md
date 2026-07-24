@@ -1,17 +1,24 @@
 <div align="center">
 
-# 🚀 NeoKirilX Scripts
+# 🚀 NeoKirilX Roblox Scripts
 
-> "Исходники? Конечно открыты!  
-> ...А, вы про скрипты? 😂"
+> **"Исходники есть?"**  
+> **Нет.** 😎
 
-![Lua](https://img.shields.io/badge/Lua-Roblox-blue?style=for-the-badge)
+![Lua](https://img.shields.io/badge/Language-Lua-blue?style=for-the-badge)
+![Roblox](https://img.shields.io/badge/Platform-Roblox-red?style=for-the-badge)
 ![Status](https://img.shields.io/badge/Status-Active-success?style=for-the-badge)
-![Owner](https://img.shields.io/badge/Owner-NeoKirilX-orange?style=for-the-badge)
+![License](https://img.shields.io/badge/License-Private-orange?style=for-the-badge)
 
-### 👑 Репозиторий принадлежит **NeoKirilX**
+### 👑 Owner
 
-📢 **Telegram канал:** https://telegram.me/ScriptsByNeoKirilX
+**NeoKirilX**
+
+📢 **Telegram:** https://telegram.me/ScriptsByNeoKirilX
+
+⭐ Если понравился проект — поставьте Star.
+
+</div>
 
 ---
 
@@ -20,111 +27,226 @@
 ## 💼 Hack A Business
 
 ```lua
-loadstring(game:HttpGet("PASTE_HACK_A_BUSINESS_LINK_HERE"))()
+loadstring(game:HttpGet("https://raw.githubusercontent.com/KKirillPRO1000/Universall-Script-Roblox/main/hacker_game.lua"))()
 ```
-
-> 💀 Исходный код?
->
-> **Хорошая попытка.**
->
-> Его увидят только избранные...
->
-> И нет, `Dex Explorer` тебе не поможет.
 
 ---
 
 ## 🔪 Murder Mystery 2
 
 ```lua
-loadstring(game:HttpGet("PASTE_MM2_LINK_HERE"))()
+loadstring(game:HttpGet("https://raw.githubusercontent.com/KKirillPRO1000/Universall-Script-Roblox/main/mm2.lua"))()
 ```
-
-> 🤫 Хочешь декомпилировать?
->
-> Сервер:
->
-> ```
-> 404 Brain Not Found
-> ```
->
-> Код закрыт.
->
-> Смирись.
 
 ---
 
 ## 🌍 Universal
 
 ```lua
-loadstring(game:HttpGet("PASTE_UNIVERSAL_LINK_HERE"))()
+loadstring(game:HttpGet("https://raw.githubusercontent.com/KKirillPRO1000/Universall-Script-Roblox/main/script.lua"))()
 ```
-
-> 🕵️
->
-> ```
-> local Source = nil
-> print(Source)
-> --> nil
-> ```
->
-> Именно столько исходников ты получишь.
 
 ---
 
-# 🎨 GUI Library
+# 🎨 M3 GUI Library (Open Source)
 
-### ❤️ Единственное, что здесь действительно Open Source.
+Полностью открытая библиотека интерфейса в стиле **Material Design 3**.
+
+## Подключение
 
 ```lua
-loadstring(game:HttpGet("PASTE_GUI_LIBRARY_LINK_HERE"))()
+local M3 = loadstring(game:HttpGet("https://raw.githubusercontent.com/KKirillPRO1000/Universall-Script-Roblox/main/m3-lib.lua"))()
 ```
-
-Исходный код библиотеки открыт.
-Используйте, изменяйте, улучшайте.
 
 ---
 
-# ❓ FAQ
+## Создание окна
 
-### Где исходники скриптов?
+```lua
+local Window = M3:CreateWindow({
+    Title = "My Script",
+    Size = UDim2.new(0, 680, 0, 460)
+})
+```
 
-🤣
+---
+
+## Создание вкладок
+
+```lua
+local Home = Window:CreateTab("Home")
+local Settings = Window:CreateTab("Settings")
+```
+
+---
+
+## Создание группы
+
+```lua
+local Group = Home:CreateGroup("Main")
+```
+
+---
+
+## Кнопка
+
+```lua
+Group:AddButton("Hello", function()
+    print("Hello World!")
+end)
+```
+
+---
+
+## Toggle
+
+```lua
+Group:AddToggle("Auto Farm", false, function(state)
+    print(state)
+end)
+```
+
+---
+
+## Slider
+
+```lua
+Group:AddSlider("WalkSpeed",16,100,16,false,function(value)
+    game.Players.LocalPlayer.Character.Humanoid.WalkSpeed = value
+end)
+```
+
+---
+
+## Dropdown
+
+```lua
+Group:AddDropdown(
+    "Weapon",
+    {"Sword","Bow","Gun"},
+    "Sword",
+    false,
+    function(value)
+        print(value)
+    end
+)
+```
+
+---
+
+## Уведомление
+
+```lua
+M3:Notify({
+    Title = "Success",
+    Content = "Everything works!",
+    Duration = 3
+})
+```
+
+---
+
+## Clipboard
+
+```lua
+M3:SetClipboard("https://roblox.com")
+```
+
+---
+
+## Config Manager
+
+### Namespace
+
+```lua
+M3.ScriptNamespace = "MyScript"
+```
+
+### Сохранить
+
+```lua
+M3.ConfigManager:Save("default",{
+    Speed = 16,
+    Farm = true
+})
+```
+
+### Загрузить
+
+```lua
+local Data = M3.ConfigManager:Load("default")
+
+if Data then
+    print(Data.Speed)
+end
+```
+
+---
+
+# 😂 FAQ
+
+### Где исходный код читов?
+
+```lua
+print("Access Denied")
+```
 
 ---
 
 ### Можно купить исходники?
 
-Нет.
+❌ Нет.
 
 ---
 
-### Можно попросить?
+### Можно получить их бесплатно?
 
-Нет.
-
----
-
-### Если очень попросить?
-
-Тоже нет.
+🤣
 
 ---
 
-### А если открыть через Synapse X/Dex?
+### Я открыл Dex Explorer.
 
-Удачи.
+Поздравляем.
+
+Исходников там всё ещё нет.
+
+---
+
+### Я умею декомпилировать.
+
+Именно поэтому они закрыты. 😎
+
+---
+
+### Можно сделать Fork?
+
+Конечно.
+
+Только исходники от этого не появятся.
+
+---
+
+# ❤️ Open Source
+
+| Проект | Статус |
+|---------|--------|
+| M3 GUI Library | ✅ Open Source |
+| Universal Script | 🔒 Closed Source |
+| Hack A Business | 🔒 Closed Source |
+| Murder Mystery 2 | 🔒 Closed Source |
 
 ---
 
 # ⭐ Поддержка
 
-Если понравился проект —
+Если вам понравились мои проекты:
 
-⭐ Поставь звезду репозиторию.
+⭐ Поставьте Star этому репозиторию.
 
-📢 Подпишись на Telegram:
+📢 Подписывайтесь на Telegram:
 
-https://telegram.me/ScriptsByNeoKirilX
+## https://telegram.me/ScriptsByNeoKirilX
 
 ---
 
@@ -132,9 +254,10 @@ https://telegram.me/ScriptsByNeoKirilX
 
 ## Спасибо за использование ❤️
 
-> Пока кто-то ищет исходники,
-> ты уже играешь.
+> Пока кто-то ищет исходники...
+>
+> Ты уже играешь. 😎
 
-**Made with ☕ + Lua + бессонные ночи**
+**Made with ☕ Lua & бессонными ночами**
 
 </div>
