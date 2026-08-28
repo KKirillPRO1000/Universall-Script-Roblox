@@ -269,37 +269,32 @@ end
 
 -- MD3 press-morph: idle = rounded rectangle (light rounding), pressed = full pill, release = back.
 -- `targetCorner` is the UICorner instance to animate; `idleRadius` is the idle corner radius.
-function M3:PressMorph(targetCorner, idleRadius)
+-- Optional `triggerButton` overrides the button that fires the morph (defaults to targetCorner's ancestor TextButton).
+function M3:PressMorph(targetCorner, idleRadius, triggerButton)
     if not targetCorner then return end
     local idle = idleRadius or targetCorner.CornerRadius
     local pill = UDim.new(1, 0)
 
-    local beganConn = targetCorner:FindFirstAncestorOfClass("TextButton")
-    local function bind(btn)
-        if not btn then return end
+    local btn = triggerButton or targetCorner:FindFirstAncestorOfClass("TextButton")
+    if not btn then return end
 
-        local b = btn.InputBegan:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-                M3:Tween(targetCorner, 0.18, Enum.EasingStyle.Quart, Enum.EasingDirection.In, {
-                    CornerRadius = pill
-                })
-            end
-        end)
-        M3:TrackConnection(b)
+    local b = btn.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            M3:Tween(targetCorner, 0.18, Enum.EasingStyle.Quart, Enum.EasingDirection.In, {
+                CornerRadius = pill
+            })
+        end
+    end)
+    M3:TrackConnection(b)
 
-        local e = btn.InputEnded:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-                M3:Tween(targetCorner, 0.25, Enum.EasingStyle.Quart, Enum.EasingDirection.Out, {
-                    CornerRadius = idle
-                })
-            end
-        end)
-        M3:TrackConnection(e)
-    end
-
-    if beganConn then
-        bind(beganConn)
-    end
+    local e = btn.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            M3:Tween(targetCorner, 0.25, Enum.EasingStyle.Quart, Enum.EasingDirection.Out, {
+                CornerRadius = idle
+            })
+        end
+    end)
+    M3:TrackConnection(e)
 end
 
 function M3:SetTheme(themeName)
@@ -908,8 +903,10 @@ function M3:CreateWindow(config)
         tabBtn.Parent = tabListContainer
 
         local tabCorner = Instance.new("UICorner")
-        tabCorner.CornerRadius = UDim.new(0, 18)
+        tabCorner.CornerRadius = UDim.new(0, 10)
         tabCorner.Parent = tabBtn
+
+        M3:PressMorph(tabCorner, UDim.new(0, 10))
 
         local tabContent = Instance.new("ScrollingFrame")
         tabContent.Name = "TabContent_" .. tabName
@@ -1306,6 +1303,8 @@ function M3:CreateWindow(config)
                 headerBtn.ZIndex = 6
                 headerBtn.Parent = dropFrame
 
+                M3:PressMorph(dropCorner, UDim.new(0, 12), headerBtn)
+
                 local label = Instance.new("TextLabel")
                 label.Text = text
                 label.Font = M3.CurrentTheme.Font
@@ -1388,6 +1387,8 @@ function M3:CreateWindow(config)
                             oCorner.CornerRadius = UDim.new(0, 6)
                             oCorner.Parent = oBtn
 
+                            M3:PressMorph(oCorner, UDim.new(0, 6))
+
                             oBtn.MouseButton1Click:Connect(function()
                                 if multiSelect then
                                     if table.find(selected, opt) then
@@ -1435,6 +1436,8 @@ function M3:CreateWindow(config)
                 headerBtn.Text = ""
                 headerBtn.ZIndex = 6
                 headerBtn.Parent = colorFrame
+
+                M3:PressMorph(colorCorner, UDim.new(0, 12), headerBtn)
 
                 local label = Instance.new("TextLabel")
                 label.Text = text
