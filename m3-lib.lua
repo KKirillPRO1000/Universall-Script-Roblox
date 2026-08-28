@@ -1067,10 +1067,9 @@ function M3:CreateWindow(config)
                 btn.Parent = groupFrame
 
                 local btnCorner = Instance.new("UICorner")
-                btnCorner.CornerRadius = UDim.new(0, 19)
+                btnCorner.CornerRadius = UDim.new(0, 10)
                 btnCorner.Parent = btn
-
-                M3:PressMorph(btnCorner, UDim.new(0, 19))
+                M3:PressMorph(btnCorner, UDim.new(0, 10))
 
                 btn.MouseButton1Click:Connect(function()
                     if floated then floated = false return end
@@ -1088,9 +1087,9 @@ function M3:CreateWindow(config)
                     fBtn.TextSize = 13
                     fBtn.Parent = floatContainer
                     local c = Instance.new("UICorner")
-                    c.CornerRadius = UDim.new(0, 19)
+                    c.CornerRadius = UDim.new(0, 10)
                     c.Parent = fBtn
-                    M3:PressMorph(c, UDim.new(0, 19))
+                    M3:PressMorph(c, UDim.new(0, 10))
                     fBtn.MouseButton1Click:Connect(callback)
                 end)
             end
