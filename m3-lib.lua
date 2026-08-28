@@ -99,10 +99,50 @@ local M3 = {
     HideKey = Enum.KeyCode.RightControl,
     ScriptNamespace = "DefaultScript",
     ConfigFolder = "M3_Configs",
-    Springs = {}
+    Springs = {},
+    CleanupTasks = {}
 }
 
 M3.CurrentTheme = M3.Themes.Dark
+
+-- Cleanup registry: track connections, threads, and instances for auto-destruction
+function M3:TrackConnection(conn)
+    if conn then
+        table.insert(M3.CleanupTasks, {
+            Type = "Connection",
+            Value = conn
+        })
+    end
+    return conn
+end
+
+function M3:TrackThread(thread)
+    if thread and coroutine.status(thread) ~= "dead" then
+        table.insert(M3.CleanupTasks, {
+            Type = "Thread",
+            Value = thread
+        })
+    end
+    return thread
+end
+
+function M3:TrackInstance(instance)
+    if instance then
+        table.insert(M3.CleanupTasks, {
+            Type = "Instance",
+            Value = instance
+        })
+    end
+    return instance
+end
+
+function M3:Untrack(connOrThread)
+    for i = #M3.CleanupTasks, 1, -1 do
+        if M3.CleanupTasks[i].Value == connOrThread then
+            table.remove(M3.CleanupTasks, i)
+        end
+    end
+end
 
 local SafeParent = (gethui and gethui()) or CoreGui:FindFirstChild("RobloxGui") or CoreGui
 
@@ -141,8 +181,12 @@ function M3:SetClipboard(text)
         setclipboard(str)
     elseif toclipboard then
         toclipboard(str)
-    elseif Syn and Syn.set_thread_identity then
-        setclipboard(str)
+    elseif (Syn and Syn.set_thread_identity) or (syn and syn.set_thread_identity) then
+        if setclipboard then
+            setclipboard(str)
+        else
+            warn("SetClipboard is not available on this environment.")
+        end
     else
         warn("SetClipboard is not supported on this environment.")
     end
@@ -164,16 +208,31 @@ function M3:CreateSpring(initialPos, mass, damping, stiffness)
         self.Position = self.Position + self.Velocity * dt
         return self.Position
     end
+    function spring:Destroy()
+        self.Enabled = false
+        for i = #M3.Springs, 1, -1 do
+            if M3.Springs[i] == self then
+                table.remove(M3.Springs, i)
+            end
+        end
+    end
     table.insert(M3.Springs, spring)
     return spring
 end
 
-RunService.RenderStepped:Connect(function(dt)
+local springLoopConn = RunService.RenderStepped:Connect(function(dt)
     for i = #M3.Springs, 1, -1 do
         local s = M3.Springs[i]
-        s:Update(dt)
+        if s and s.Enabled ~= false then
+            s:Update(dt)
+        end
     end
 end)
+if M3.TrackConnection then
+    M3:TrackConnection(springLoopConn)
+else
+    table.insert(M3.Connections, springLoopConn)
+end
 
 function M3:Tween(instance, time, style, direction, props)
     local info = TweenInfo.new(time or 0.25, style or Enum.EasingStyle.Quart, direction or Enum.EasingDirection.Out)
@@ -362,6 +421,19 @@ function M3:Notify(options)
     timerBar.BorderSizePixel = 0
     timerBar.Parent = card
 
+    local closed = false
+    local function CloseCard()
+        if closed then return end
+        closed = true
+        M3:Tween(card, 0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.In, {
+            Position = UDim2.new(1, 350, 0, 0)
+        }).Completed:Connect(function()
+            if card and card.Parent then
+                card:Destroy()
+            end
+        end)
+    end
+
     if #buttons > 0 then
         card.Size = UDim2.new(1, 0, 0, 120)
         body.Size = UDim2.new(1, -contentOffset - 14, 0, 28)
@@ -396,11 +468,7 @@ function M3:Notify(options)
                 if btnData.Callback then
                     btnData.Callback()
                 end
-                M3:Tween(card, 0.25, Enum.EasingStyle.Quart, Enum.EasingDirection.In, {
-                    Position = UDim2.new(1, 350, 0, 0)
-                }).Completed:Connect(function()
-                    card:Destroy()
-                end)
+                CloseCard()
             end)
         end
     end
@@ -415,11 +483,7 @@ function M3:Notify(options)
 
     task.delay(duration, function()
         if card and card.Parent then
-            M3:Tween(card, 0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.In, {
-                Position = UDim2.new(1, 350, 0, 0)
-            }).Completed:Connect(function()
-                card:Destroy()
-            end)
+            CloseCard()
         end
     end)
 end
@@ -478,7 +542,7 @@ function M3:CreateFloatingWindow(elementName, contentConstructFn)
     contentConstructFn(body)
 
     local dragging, dragStart, startPos
-    topBar.InputBegan:Connect(function(input)
+    local topBarBeganConn = topBar.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             dragging = true
             dragStart = input.Position
@@ -486,22 +550,38 @@ function M3:CreateFloatingWindow(elementName, contentConstructFn)
         end
     end)
 
-    UserInputService.InputChanged:Connect(function(input)
+    local inputChangedConn = UserInputService.InputChanged:Connect(function(input)
         if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-            local delta = input.Position - dragStart
-            floatFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+            if floatFrame and floatFrame.Parent then
+                local delta = input.Position - dragStart
+                floatFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+            end
         end
     end)
 
-    UserInputService.InputEnded:Connect(function(input)
+    local inputEndedConn = UserInputService.InputEnded:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             dragging = false
         end
     end)
 
-    closeBtn.MouseButton1Click:Connect(function()
-        floatFrame:Destroy()
+    M3:TrackConnection(topBarBeganConn)
+    M3:TrackConnection(inputChangedConn)
+    M3:TrackConnection(inputEndedConn)
+
+    local function DestroyFloat()
+        if floatFrame and floatFrame.Parent then
+            floatFrame:Destroy()
+        end
+        M3:Untrack(topBarBeganConn)
+        M3:Untrack(inputChangedConn)
+        M3:Untrack(inputEndedConn)
+    end
+
+    local closeClickConn = closeBtn.MouseButton1Click:Connect(function()
+        DestroyFloat()
     end)
+    M3:TrackConnection(closeClickConn)
 
     table.insert(M3.FloatingWindows, floatFrame)
     return floatFrame
@@ -514,7 +594,11 @@ function M3:CreateWindow(config)
     local windowId = config.Id or windowTitle
 
     if M3.ActiveWindows[windowId] then
-        M3.ActiveWindows[windowId]:Destroy()
+        local oldWindow = M3.ActiveWindows[windowId]
+        pcall(function()
+            oldWindow:Destroy()
+        end)
+        M3.ActiveWindows[windowId] = nil
     end
 
     local mainFrame = Instance.new("Frame")
@@ -654,7 +738,7 @@ function M3:CreateWindow(config)
     resizeHandle.Parent = mainFrame
 
     local dragging, dragStart, startPos
-    topBar.InputBegan:Connect(function(input)
+    local topBarBeganConn = topBar.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             dragging = true
             dragStart = input.Position
@@ -662,21 +746,27 @@ function M3:CreateWindow(config)
         end
     end)
 
-    UserInputService.InputChanged:Connect(function(input)
+    local inputChangedConn = UserInputService.InputChanged:Connect(function(input)
         if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-            local delta = input.Position - dragStart
-            mainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+            if mainFrame and mainFrame.Parent then
+                local delta = input.Position - dragStart
+                mainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+            end
         end
     end)
 
-    UserInputService.InputEnded:Connect(function(input)
+    local inputEndedConn = UserInputService.InputEnded:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             dragging = false
         end
     end)
 
+    M3:TrackConnection(topBarBeganConn)
+    M3:TrackConnection(inputChangedConn)
+    M3:TrackConnection(inputEndedConn)
+
     local resizing, resizeStart, startSize
-    resizeHandle.InputBegan:Connect(function(input)
+    local resizeBeganConn = resizeHandle.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             resizing = true
             resizeStart = input.Position
@@ -684,20 +774,26 @@ function M3:CreateWindow(config)
         end
     end)
 
-    UserInputService.InputChanged:Connect(function(input)
+    local resizeChangedConn = UserInputService.InputChanged:Connect(function(input)
         if resizing and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-            local delta = input.Position - resizeStart
-            local newX = math.max(340, startSize.X + delta.X)
-            local newY = math.max(260, startSize.Y + delta.Y)
-            mainFrame.Size = UDim2.new(0, newX, 0, newY)
+            if mainFrame and mainFrame.Parent then
+                local delta = input.Position - resizeStart
+                local newX = math.max(340, startSize.X + delta.X)
+                local newY = math.max(260, startSize.Y + delta.Y)
+                mainFrame.Size = UDim2.new(0, newX, 0, newY)
+            end
         end
     end)
 
-    UserInputService.InputEnded:Connect(function(input)
+    local resizeEndedConn = UserInputService.InputEnded:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             resizing = false
         end
     end)
+
+    M3:TrackConnection(resizeBeganConn)
+    M3:TrackConnection(resizeChangedConn)
+    M3:TrackConnection(resizeEndedConn)
 
     local isMinimized = false
     local function ToggleMinimize()
@@ -738,6 +834,12 @@ function M3:CreateWindow(config)
     function WindowAPI:Destroy()
         mainFrame:Destroy()
         M3.ActiveWindows[windowId] = nil
+        M3:Untrack(topBarBeganConn)
+        M3:Untrack(inputChangedConn)
+        M3:Untrack(inputEndedConn)
+        M3:Untrack(resizeBeganConn)
+        M3:Untrack(resizeChangedConn)
+        M3:Untrack(resizeEndedConn)
     end
 
     closeBtn.MouseButton1Click:Connect(function()
@@ -856,14 +958,17 @@ function M3:CreateWindow(config)
             local function SetupKeybindAndFloat(elementBtn, name, primaryCallback, constructFloatContent)
                 local holdTime = 0
                 local holding = false
+                local floated = false
 
                 elementBtn.InputBegan:Connect(function(input)
                     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
                         holding = true
+                        floated = false
                         holdTime = tick()
                         task.delay(0.8, function()
                             if holding and (tick() - holdTime >= 0.75) then
                                 holding = false
+                                floated = true
                                 M3:Notify({Title = "Floating Mode", Content = "Detached '" .. name .. "' to floating window.", Duration = 2.5})
                                 M3:CreateFloatingWindow(name, constructFloatContent)
                             end
@@ -885,6 +990,7 @@ function M3:CreateWindow(config)
                             local boundKey = inp.KeyCode ~= Enum.KeyCode.Unknown and inp.KeyCode or inp.UserInputType
                             M3:Notify({Title = "Keybound!", Content = name .. " bound to " .. tostring(boundKey.Name), Duration = 2.5})
                             conn:Disconnect()
+                            M3:Untrack(conn)
                             local bindConn
                             bindConn = UserInputService.InputBegan:Connect(function(execInp, execGpe)
                                 if not execGpe and (execInp.KeyCode == boundKey or execInp.UserInputType == boundKey) then
@@ -892,8 +998,10 @@ function M3:CreateWindow(config)
                                 end
                             end)
                             table.insert(M3.Connections, bindConn)
+                            M3:TrackConnection(bindConn)
                         end
                     end)
+                    M3:TrackConnection(conn)
                 end)
             end
 
@@ -913,6 +1021,7 @@ function M3:CreateWindow(config)
                 btnCorner.Parent = btn
 
                 btn.MouseButton1Click:Connect(function()
+                    if floated then floated = false return end
                     M3:Ripple(btn, UserInputService:GetMouseLocation().X, UserInputService:GetMouseLocation().Y)
                     callback()
                 end)
@@ -994,6 +1103,7 @@ function M3:CreateWindow(config)
                 end
 
                 toggleFrame.MouseButton1Click:Connect(function()
+                    if floated then floated = false return end
                     SetState(not state)
                 end)
 
@@ -1019,6 +1129,9 @@ function M3:CreateWindow(config)
             function GroupAPI:AddSlider(text, minVal, maxVal, defaultVal, precise, callback)
                 minVal = minVal or 0
                 maxVal = maxVal or 100
+                if maxVal == minVal then
+                    maxVal = minVal + 1
+                end
                 defaultVal = math.clamp(defaultVal or minVal, minVal, maxVal)
 
                 local sliderFrame = Instance.new("Frame")
@@ -1080,14 +1193,17 @@ function M3:CreateWindow(config)
                 fillCorner.Parent = fill
 
                 local draggingSlider = false
+                local function RoundVal(val)
+                    if not precise then
+                        return math.floor(val + 0.5)
+                    else
+                        return math.floor(val * 100 + 0.5) / 100
+                    end
+                end
                 local function UpdateSlider(input)
                     local pct = math.clamp((input.Position.X - track.AbsolutePosition.X) / track.AbsoluteSize.X, 0, 1)
                     local val = minVal + (maxVal - minVal) * pct
-                    if not precise then
-                        val = math.floor(val + 0.5)
-                    else
-                        val = math.floor(val * 100 + 0.5) / 100
-                    end
+                    val = RoundVal(val)
                     fill.Size = UDim2.new((val - minVal)/(maxVal - minVal), 0, 1, 0)
                     valLabel.Text = tostring(val)
                     callback(val)
@@ -1377,7 +1493,7 @@ function M3:CreateSubWindow(config)
     body.Parent = subFrame
 
     local dragging, dragStart, startPos
-    topBar.InputBegan:Connect(function(input)
+    local topBarBeganConn = topBar.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             dragging = true
             dragStart = input.Position
@@ -1385,36 +1501,113 @@ function M3:CreateSubWindow(config)
         end
     end)
 
-    UserInputService.InputChanged:Connect(function(input)
+    local inputChangedConn = UserInputService.InputChanged:Connect(function(input)
         if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-            local delta = input.Position - dragStart
-            subFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+            if subFrame and subFrame.Parent then
+                local delta = input.Position - dragStart
+                subFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+            end
         end
     end)
 
-    UserInputService.InputEnded:Connect(function(input)
+    local inputEndedConn = UserInputService.InputEnded:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             dragging = false
         end
     end)
 
-    closeBtn.MouseButton1Click:Connect(function()
-        subFrame:Destroy()
+    M3:TrackConnection(topBarBeganConn)
+    M3:TrackConnection(inputChangedConn)
+    M3:TrackConnection(inputEndedConn)
+
+    local closeClickConn = closeBtn.MouseButton1Click:Connect(function()
+        if subFrame and subFrame.Parent then
+            subFrame:Destroy()
+        end
+        M3:Untrack(topBarBeganConn)
+        M3:Untrack(inputChangedConn)
+        M3:Untrack(inputEndedConn)
+        M3:Untrack(closeClickConn)
     end)
+    M3:TrackConnection(closeClickConn)
 
     table.insert(M3.ActiveSubWindows, subFrame)
     return {
         Frame = subFrame,
         Body = body,
-        Destroy = function() subFrame:Destroy() end
+        Destroy = function()
+            if subFrame and subFrame.Parent then
+                subFrame:Destroy()
+            end
+            M3:Untrack(topBarBeganConn)
+            M3:Untrack(inputChangedConn)
+            M3:Untrack(inputEndedConn)
+            M3:Untrack(closeClickConn)
+        end
     }
 end
 
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
+local hideKeyConn = UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if not gameProcessed and input.KeyCode == M3.HideKey then
         M3.IsHidden = not M3.IsHidden
-        ScreenGui.Enabled = not M3.IsHidden
+        if ScreenGui then
+            ScreenGui.Enabled = not M3.IsHidden
+        end
     end
 end)
+M3:TrackConnection(hideKeyConn)
+
+-- Alias: Cleanup all resources (connections, threads, instances, springs, UI)
+function M3:Destroy()
+    M3:Cleanup()
+end
+
+-- Auto-cleanup if the top-level ScreenGui is destroyed externally
+local cleanupDone = false
+local ancestryConn = ScreenGui.AncestryChanged:Connect(function(_, parent)
+    if parent == nil and not cleanupDone then
+        M3:Cleanup()
+    end
+end)
+M3:TrackConnection(ancestryConn)
+
+-- Prevents double-cleanup when M3:Cleanup destroys the ScreenGui
+function M3:Cleanup()
+    if cleanupDone then return end
+    cleanupDone = true
+    for i = #M3.Connections, 1, -1 do
+        local c = M3.Connections[i]
+        if c and c.Disconnect then
+            pcall(function() c:Disconnect() end)
+        end
+    end
+    for i = #M3.CleanupTasks, 1, -1 do
+        local task = M3.CleanupTasks[i]
+        if task then
+            pcall(function()
+                if task.Type == "Connection" then
+                    if task.Value and task.Value.Disconnect then
+                        task.Value:Disconnect()
+                    end
+                elseif task.Type == "Instance" then
+                    if task.Value and task.Value.Parent then
+                        task.Value:Destroy()
+                    end
+                end
+            end)
+        end
+    end
+    M3.CleanupTasks = {}
+    M3.Connections = {}
+    M3.Springs = {}
+    M3.ActiveWindows = {}
+    M3.ActiveSubWindows = {}
+    M3.FloatingWindows = {}
+    M3.IsHidden = false
+    if ScreenGui then
+        ScreenGui:Destroy()
+    end
+    cleanupDone = true
+end
 
 return M3
