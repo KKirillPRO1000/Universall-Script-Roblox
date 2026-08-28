@@ -267,6 +267,41 @@ function M3:Ripple(button, x, y)
     end)
 end
 
+-- MD3 press-morph: idle = rounded rectangle (light rounding), pressed = full pill, release = back.
+-- `targetCorner` is the UICorner instance to animate; `idleRadius` is the idle corner radius.
+function M3:PressMorph(targetCorner, idleRadius)
+    if not targetCorner then return end
+    local idle = idleRadius or targetCorner.CornerRadius
+    local pill = UDim.new(1, 0)
+
+    local beganConn = targetCorner:FindFirstAncestorOfClass("TextButton")
+    local function bind(btn)
+        if not btn then return end
+
+        local b = btn.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                M3:Tween(targetCorner, 0.18, Enum.EasingStyle.Quart, Enum.EasingDirection.In, {
+                    CornerRadius = pill
+                })
+            end
+        end)
+        M3:TrackConnection(b)
+
+        local e = btn.InputEnded:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                M3:Tween(targetCorner, 0.25, Enum.EasingStyle.Quart, Enum.EasingDirection.Out, {
+                    CornerRadius = idle
+                })
+            end
+        end)
+        M3:TrackConnection(e)
+    end
+
+    if beganConn then
+        bind(beganConn)
+    end
+end
+
 function M3:SetTheme(themeName)
     if M3.Themes[themeName] then
         M3.CurrentThemeName = themeName
@@ -463,6 +498,8 @@ function M3:Notify(options)
             local btnCorner = Instance.new("UICorner")
             btnCorner.CornerRadius = UDim.new(0, 8)
             btnCorner.Parent = actionBtn
+
+            M3:PressMorph(btnCorner, UDim.new(0, 8))
 
             actionBtn.MouseButton1Click:Connect(function()
                 if btnData.Callback then
@@ -831,6 +868,14 @@ function M3:CreateWindow(config)
         wallpaperLabel.ImageTransparency = transparency or 0.85
     end
 
+    function WindowAPI:SetVisible(visible)
+        mainFrame.Visible = visible
+    end
+
+    function WindowAPI:GetVisible()
+        return mainFrame.Visible
+    end
+
     function WindowAPI:Destroy()
         mainFrame:Destroy()
         M3.ActiveWindows[windowId] = nil
@@ -840,7 +885,12 @@ function M3:CreateWindow(config)
         M3:Untrack(resizeBeganConn)
         M3:Untrack(resizeChangedConn)
         M3:Untrack(resizeEndedConn)
+        if WindowAPI.OnClose then
+            pcall(WindowAPI.OnClose)
+        end
     end
+
+    WindowAPI.OnClose = nil
 
     closeBtn.MouseButton1Click:Connect(function()
         WindowAPI:Destroy()
@@ -1020,6 +1070,8 @@ function M3:CreateWindow(config)
                 btnCorner.CornerRadius = UDim.new(0, 19)
                 btnCorner.Parent = btn
 
+                M3:PressMorph(btnCorner, UDim.new(0, 19))
+
                 btn.MouseButton1Click:Connect(function()
                     if floated then floated = false return end
                     M3:Ripple(btn, UserInputService:GetMouseLocation().X, UserInputService:GetMouseLocation().Y)
@@ -1038,6 +1090,7 @@ function M3:CreateWindow(config)
                     local c = Instance.new("UICorner")
                     c.CornerRadius = UDim.new(0, 19)
                     c.Parent = fBtn
+                    M3:PressMorph(c, UDim.new(0, 19))
                     fBtn.MouseButton1Click:Connect(callback)
                 end)
             end
@@ -1055,6 +1108,8 @@ function M3:CreateWindow(config)
                 local toggleCorner = Instance.new("UICorner")
                 toggleCorner.CornerRadius = UDim.new(0, 12)
                 toggleCorner.Parent = toggleFrame
+
+                M3:PressMorph(toggleCorner, UDim.new(0, 12))
 
                 local label = Instance.new("TextLabel")
                 label.Text = text
@@ -1119,6 +1174,7 @@ function M3:CreateWindow(config)
                     local c = Instance.new("UICorner")
                     c.CornerRadius = UDim.new(0, 10)
                     c.Parent = fTrack
+                    M3:PressMorph(c, UDim.new(0, 10))
                     fTrack.MouseButton1Click:Connect(function()
                         SetState(not state)
                         fTrack.Text = text .. ": " .. (state and "ON" or "OFF")
