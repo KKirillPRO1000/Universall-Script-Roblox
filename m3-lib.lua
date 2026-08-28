@@ -3,6 +3,7 @@ local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local HttpService = game:GetService("HttpService")
+local TextService = game:GetService("TextService")
 
 local M3 = {
     Connections = {},
@@ -370,34 +371,155 @@ end
 
 M3.ConfigManager = ConfigManager
 
+-- Icon cache for downloaded PNGs
+M3.IconCache = {}
+
+-- Resolve an icon reference to an Image property value for an ImageLabel/ImageButton.
+-- Accepts:
+--   * nil / "": empty (no icon)
+--   * "rbxassetid://123..." or a plain number: treated as an asset id
+--   * "http(s)://...": full custom URL (used as-is for getcustomasset download)
+--   * a name (e.g. "cog", "home", "close"): downloads a Material Design icon PNG via writefile/getcustomasset, cached per session.
+-- Returns an Image string, or "" if nothing usable could be resolved.
+function M3:LoadIcon(iconId)
+    if iconId == nil or iconId == "" then return "" end
+
+    local str = tostring(iconId)
+
+    -- Plain numeric asset id
+    if tonumber(str) then
+        return "rbxassetid://" .. tostring(math.floor(tonumber(str)))
+    end
+
+    -- Already a Roblox asset reference
+    if str:lower():match("^rbxassetid://") then
+        return str
+    end
+
+    -- Full http(s) URL: fetch and cache as a custom asset
+    if str:lower():match("^https?://") then
+        if getcustomasset and isfile and writefile then
+            if M3.IconCache[str] then return M3.IconCache[str] end
+            local fileName = "m3_icons/" .. string.gsub(str, "[^%w]", "_"):sub(1, 80) .. ".png"
+            local ok, data = pcall(function() return game:HttpGet(str) end)
+            if ok and data and #data > 100 then
+                local saved = pcall(function()
+                    if isfolder("m3_icons") == false then
+                        makefolder("m3_icons")
+                    end
+                    writefile(fileName, data)
+                end)
+                if saved then
+                    local got, asset = pcall(getcustomasset, fileName)
+                    if got and asset then
+                        M3.IconCache[str] = asset
+                        return asset
+                    end
+                end
+            end
+        end
+        return ""
+    end
+
+    -- Named Material Design icon: try several hosted PNG mirrors
+    if getcustomasset and isfile and writefile then
+        if M3.IconCache[str] then return M3.IconCache[str] end
+
+        local name = string.gsub(str, "[^%w]", "")
+        if name == "" then return "" end
+
+        local sources = {
+            "https://raw.githubusercontent.com/Templarian/MaterialDesign/master/png/" .. name .. ".png",
+            "https://cdn.jsdelivr.net/gh/Templarian/MaterialDesign@master/png/" .. name .. ".png",
+        }
+
+        for _, url in ipairs(sources) do
+            local ok, data = pcall(function() return game:HttpGet(url) end)
+            if ok and data and #data > 100 then
+                local fileName = "m3_icons/" .. name .. ".png"
+                local saved = pcall(function()
+                    if isfolder("m3_icons") == false then
+                        makefolder("m3_icons")
+                    end
+                    writefile(fileName, data)
+                end)
+                if saved then
+                    local got, asset = pcall(getcustomasset, fileName)
+                    if got and asset then
+                        M3.IconCache[str] = asset
+                        return asset
+                    end
+                end
+            end
+        end
+    end
+
+    return ""
+end
+
+-- Notification holder: bottom-right, stacked manually (dynamic-island style).
 local NotificationHolder = Instance.new("Frame")
 NotificationHolder.Name = "M3_NotificationHolder"
-NotificationHolder.Size = UDim2.new(0, 320, 1, -30)
-NotificationHolder.Position = UDim2.new(1, -330, 0, 15)
+NotificationHolder.Size = UDim2.new(0, 320, 1, 0)
+NotificationHolder.Position = UDim2.new(1, -16, 1, -10)
+NotificationHolder.AnchorPoint = Vector2.new(1, 1)
 NotificationHolder.BackgroundTransparency = 1
 NotificationHolder.ZIndex = 999
 NotificationHolder.Parent = ScreenGui
 
-local NotifLayout = Instance.new("UIListLayout")
-NotifLayout.SortOrder = Enum.SortOrder.LayoutOrder
-NotifLayout.Padding = UDim.new(0, 10)
-NotifLayout.VerticalAlignment = Enum.VerticalAlignment.Bottom
-NotifLayout.Parent = NotificationHolder
+M3.ActiveNotifs = {}
+
+-- Notification sound (rbxassetid): created once, reused for every Notify.
+local NotifySound
+M3.NotifySoundId = "rbxassetid://139746569667955"
+M3.NotifySoundVolume = 0.5
+M3.NotifySoundEnabled = true
+do
+    local ok, sound = pcall(function()
+        local s = Instance.new("Sound")
+        s.SoundId = M3.NotifySoundId
+        s.Volume = M3.NotifySoundVolume
+        s.Parent = ScreenGui
+        return s
+    end)
+    if ok and sound then NotifySound = sound end
+end
+
+function M3:PlayNotifySound()
+    if M3.NotifySoundEnabled == false then return end
+    if NotifySound and M3.NotifySoundId ~= "" then
+        pcall(function()
+            NotifySound.Volume = M3.NotifySoundVolume
+            NotifySound.SoundId = M3.NotifySoundId
+            NotifySound:Play()
+        end)
+    end
+end
 
 function M3:Notify(options)
     options = options or {}
     local titleText = options.Title or "Notification"
     local contentText = options.Content or ""
-    local duration = options.Duration or 4.5
-    local iconId = options.Icon or ""
+    local displayMs = options.Duration or 5000
+    local iconId = M3:LoadIcon(options.Icon or "")
     local buttons = options.Buttons or {}
+    local autoHide = displayMs ~= nil and displayMs > 0 or false
+
+    M3:PlayNotifySound()
+
+    local PAD_TOP = 12
+    local PAD_BOTTOM = 12
+    local TITLE_H = 20
+    local BODY_GAP = 3
+    local BAR_H = 3
+    local CARD_W = 320
 
     local card = Instance.new("Frame")
     card.Name = "NotifCard"
-    card.Size = UDim2.new(1, 0, 0, 85)
+    card.Size = UDim2.new(0, CARD_W, 0, 40)
     card.BackgroundColor3 = M3.CurrentTheme.SurfaceContainerHigh
-    card.Position = UDim2.new(1, 350, 0, 0)
     card.ClipsDescendants = true
+    card.ZIndex = 999
     card.Parent = NotificationHolder
 
     local corner = Instance.new("UICorner")
@@ -410,7 +532,7 @@ function M3:Notify(options)
     stroke.Parent = card
 
     local contentOffset = 16
-    if iconId ~= "" then
+    if iconId ~= "" and iconId ~= nil then
         local iconImg = Instance.new("ImageLabel")
         iconImg.Size = UDim2.new(0, 24, 0, 24)
         iconImg.Position = UDim2.new(0, 14, 0, 14)
@@ -426,10 +548,11 @@ function M3:Notify(options)
     title.Font = M3.CurrentTheme.FontBold
     title.TextSize = 15
     title.TextColor3 = M3.CurrentTheme.OnSurface
-    title.Position = UDim2.new(0, contentOffset, 0, 12)
-    title.Size = UDim2.new(1, -contentOffset - 14, 0, 20)
+    title.Position = UDim2.new(0, contentOffset, 0, PAD_TOP)
+    title.Size = UDim2.new(1, -contentOffset - 14, 0, TITLE_H)
     title.BackgroundTransparency = 1
     title.TextXAlignment = Enum.TextXAlignment.Left
+    title.TextWrapped = true
     title.Parent = card
 
     local body = Instance.new("TextLabel")
@@ -437,40 +560,51 @@ function M3:Notify(options)
     body.Font = M3.CurrentTheme.Font
     body.TextSize = 13
     body.TextColor3 = M3.CurrentTheme.OnSurfaceVariant
-    body.Position = UDim2.new(0, contentOffset, 0, 32)
+    body.Position = UDim2.new(0, contentOffset, 0, PAD_TOP + TITLE_H + BODY_GAP)
     body.Size = UDim2.new(1, -contentOffset - 14, 0, 32)
     body.BackgroundTransparency = 1
     body.TextWrapped = true
     body.TextXAlignment = Enum.TextXAlignment.Left
     body.Parent = card
 
+    -- Measure body height accurately with TextService (2 lines max before growing the card)
+    local bodyH = 0
+    if contentText ~= "" then
+        local availW = CARD_W - contentOffset - 14
+        local sz = pcall(function()
+            return TextService:GetTextSize(contentText, 13, M3.CurrentTheme.Font, Vector2.new(availW, 512))
+        end)
+        if sz then
+            bodyH = math.max(18, math.min(48, sz.Y))
+        else
+            bodyH = 18
+        end
+    end
+    body.Size = UDim2.new(1, -contentOffset - 14, 0, bodyH)
+
+    -- Buttons area (optional)
+    local btnAreaH = 0
+    if #buttons > 0 then
+        btnAreaH = 32
+    end
+
+    local cardH = PAD_TOP + TITLE_H + BODY_GAP + bodyH + PAD_BOTTOM + btnAreaH + BAR_H
+    card.Size = UDim2.new(0, CARD_W, 0, cardH)
+
     local timerBar = Instance.new("Frame")
-    timerBar.Size = UDim2.new(1, 0, 0, 3)
-    timerBar.Position = UDim2.new(0, 0, 1, -3)
+    timerBar.Size = UDim2.new(1, 0, 0, BAR_H)
+    timerBar.Position = UDim2.new(0, 0, 1, -BAR_H)
     timerBar.BackgroundColor3 = M3.CurrentTheme.Primary
     timerBar.BorderSizePixel = 0
     timerBar.Parent = card
-
-    local closed = false
-    local function CloseCard()
-        if closed then return end
-        closed = true
-        M3:Tween(card, 0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.In, {
-            Position = UDim2.new(1, 350, 0, 0)
-        }).Completed:Connect(function()
-            if card and card.Parent then
-                card:Destroy()
-            end
-        end)
+    if not autoHide then
+        timerBar.BackgroundTransparency = 1
     end
 
     if #buttons > 0 then
-        card.Size = UDim2.new(1, 0, 0, 120)
-        body.Size = UDim2.new(1, -contentOffset - 14, 0, 28)
-
         local btnContainer = Instance.new("Frame")
         btnContainer.Size = UDim2.new(1, -20, 0, 30)
-        btnContainer.Position = UDim2.new(0, 10, 1, -38)
+        btnContainer.Position = UDim2.new(0, 10, 1, -(30 + BAR_H))
         btnContainer.BackgroundTransparency = 1
         btnContainer.Parent = card
 
@@ -500,24 +634,162 @@ function M3:Notify(options)
                 if btnData.Callback then
                     btnData.Callback()
                 end
-                CloseCard()
+                M3.HideNotif(n)
             end)
         end
     end
 
-    M3:Tween(card, 0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out, {
-        Position = UDim2.new(0, 0, 0, 0)
+    -- Manual bottom-up stacking (newest at the bottom)
+    local n = {
+        Card = card,
+        Height = cardH,
+        SlotY = 0,
+        Closing = false,
+    }
+    table.insert(M3.ActiveNotifs, n)
+
+    -- Entry: start off-screen (bottom-right), fly in to its slot
+    card.AnchorPoint = Vector2.new(0, 1)
+    card.Position = UDim2.new(1, 60, 0, n.SlotY - 6)
+
+    M3:Tween(card, 0.45, Enum.EasingStyle.Back, Enum.EasingDirection.Out, {
+        Position = UDim2.new(0, 0, 0, n.SlotY)
     })
 
-    M3:Tween(timerBar, duration, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, {
-        Size = UDim2.new(0, 0, 0, 3)
-    })
+    -- Timer / progress bar
+    local total = autoHide and (displayMs / 1000) or 0
+    local remaining = total
+    local paused = false
+    timerBar.Size = UDim2.new(1, 0, 0, BAR_H)
 
-    task.delay(duration, function()
-        if card and card.Parent then
-            CloseCard()
+    local heartbeat
+    if autoHide then
+        heartbeat = RunService.Heartbeat:Connect(function(dt)
+            if n.Closing then return end
+            if paused then return end
+            if remaining > 0 then
+                remaining = remaining - dt
+                if remaining < 0 then remaining = 0 end
+                timerBar.Size = UDim2.new(remaining / total, 0, 0, BAR_H)
+                if remaining <= 0 then
+                    M3.HideNotif(n, "timeout")
+                end
+            end
+        end)
+        M3:TrackConnection(heartbeat)
+    end
+
+    -- Hover -> pause
+    card.MouseEnter:Connect(function()
+        paused = true
+    end)
+    card.MouseLeave:Connect(function()
+        if not dragging then paused = false end
+    end)
+
+    -- Drag / swipe
+    local dragging = false
+    local dragStartMouse
+    local dragStartPos
+
+    card.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            paused = true
+            dragStartMouse = input.Position
+            dragStartPos = card.Position
         end
     end)
+
+    local dragMoved = UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local mp = input.Position or UserInputService:GetMouseLocation()
+            if mp then
+                local dx = mp.X - dragStartMouse.X
+                local dy = mp.Y - dragStartMouse.Y
+                -- card is bottom-anchored: moving down on screen reduces Y offset
+                card.Position = UDim2.new(0, math.max(0, dragStartPos.X.Offset + dx), 0, dragStartPos.Y.Offset - dy)
+            end
+        end
+    end)
+    M3:TrackConnection(dragMoved)
+
+    local dragEnded = UserInputService.InputEnded:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
+            dragging = false
+            local dxX = card.Position.X.Offset
+            local dyDown = n.SlotY - card.Position.Y.Offset
+            paused = false
+            if dxX > 120 then
+                M3.HideNotif(n, "right")
+            elseif dyDown > 90 then
+                M3.HideNotif(n, "down")
+            else
+                -- spring back to rest
+                M3:Tween(card, 0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out, {
+                    Position = UDim2.new(0, 0, 0, n.SlotY)
+                })
+            end
+        end
+    end)
+    M3:TrackConnection(dragEnded)
+
+    return function()
+        M3.HideNotif(n, "timeout")
+    end
+end
+
+-- Remove a notification from the stack (with optional exit direction: "timeout", "right", "down").
+function M3:HideNotif(n, direction)
+    if not n or n.Closing then return end
+    n.Closing = true
+    if n.Card and n.Card.Parent then
+        -- remove from stack + reflow others
+        local idx
+        for i, e in ipairs(M3.ActiveNotifs) do
+            if e == n then idx = i end
+        end
+        if idx then table.remove(M3.ActiveNotifs, idx) end
+        M3.ReflowNotifs()
+
+        local card = n.Card
+        if direction == "right" then
+            M3:Tween(card, 0.35, Enum.EasingStyle.Quart, Enum.EasingDirection.In, {
+                Position = UDim2.new(2, 40, 0, card.Position.Y.Offset),
+                BackgroundTransparency = 1
+            })
+        elseif direction == "down" then
+            M3:Tween(card, 0.35, Enum.EasingStyle.Quart, Enum.EasingDirection.In, {
+                Position = UDim2.new(0, card.Position.X.Offset, 0, -(NotificationHolder.AbsoluteSize.Y or 300) - 60),
+                BackgroundTransparency = 1
+            })
+        else
+            -- timeout / default: fold back toward bottom-right corner
+            M3:Tween(card, 0.4, Enum.EasingStyle.Quart, Enum.EasingDirection.In, {
+                Position = UDim2.new(1, 60, 0, card.Position.Y.Offset),
+                BackgroundTransparency = 1
+            })
+        end
+        task.delay(0.45, function()
+            if card and card.Parent then card:Destroy() end
+        end)
+    end
+end
+
+-- Reposition all active notifications to their correct stacked slots.
+function M3:ReflowNotifs()
+    local y = 0
+    for i = #M3.ActiveNotifs, 1, -1 do
+        local cardN = M3.ActiveNotifs[i]
+        local targetY = y
+        cardN.SlotY = targetY
+        if cardN.Card and cardN.Card.Parent and not cardN.Closing then
+            M3:Tween(cardN.Card, 0.35, Enum.EasingStyle.Quart, Enum.EasingDirection.Out, {
+                Position = UDim2.new(0, 0, 0, targetY)
+            })
+        end
+        y = y + cardN.Height + 8
+    end
 end
 
 function M3:CreateFloatingWindow(elementName, contentConstructFn)
@@ -895,12 +1167,40 @@ function M3:CreateWindow(config)
         local tabBtn = Instance.new("TextButton")
         tabBtn.Size = (M3.Device == "Mobile") and UDim2.new(0, 100, 1, 0) or UDim2.new(1, 0, 0, 36)
         tabBtn.BackgroundColor3 = M3.CurrentTheme.SurfaceContainer
-        tabBtn.Text = tabName
-        tabBtn.TextColor3 = M3.CurrentTheme.OnSurfaceVariant
-        tabBtn.Font = M3.CurrentTheme.FontBold
-        tabBtn.TextSize = 13
+        tabBtn.Text = ""
         tabBtn.ZIndex = 4
         tabBtn.Parent = tabListContainer
+
+        local tabBtnText = Instance.new("TextLabel")
+        tabBtnText.Text = tabName
+        tabBtnText.TextColor3 = M3.CurrentTheme.OnSurfaceVariant
+        tabBtnText.Font = M3.CurrentTheme.FontBold
+        tabBtnText.TextSize = 13
+        tabBtnText.BackgroundTransparency = 1
+        tabBtnText.TextXAlignment = Enum.TextXAlignment.Left
+        tabBtnText.ZIndex = 5
+        tabBtnText.Parent = tabBtn
+
+        -- Resolve optional icon (name / asset id / url) and show it left of the text
+        local tabIconImage = M3:LoadIcon(iconId)
+        local tabIcon
+        if tabIconImage ~= "" then
+            tabIcon = Instance.new("ImageLabel")
+            tabIcon.Size = UDim2.new(0, 18, 0, 18)
+            tabIcon.Position = UDim2.new(0, 10, 0.5, -9)
+            tabIcon.BackgroundTransparency = 1
+            tabIcon.Image = tabIconImage
+            tabIcon.ImageColor3 = M3.CurrentTheme.OnSurfaceVariant
+            tabIcon.ScaleType = Enum.ScaleType.Fit
+            tabIcon.ZIndex = 6
+            tabIcon.Parent = tabBtn
+
+            tabBtnText.Position = UDim2.new(0, 34, 0, 0)
+            tabBtnText.Size = UDim2.new(1, -40, 1, 0)
+        else
+            tabBtnText.Position = UDim2.new(0, 12, 0, 0)
+            tabBtnText.Size = UDim2.new(1, -20, 1, 0)
+        end
 
         local tabCorner = Instance.new("UICorner")
         tabCorner.CornerRadius = UDim.new(0, 10)
@@ -929,6 +1229,8 @@ function M3:CreateWindow(config)
 
         local TabAPI = {
             Button = tabBtn,
+            Text = tabBtnText,
+            Icon = tabIcon,
             Container = tabContent
         }
 
@@ -936,16 +1238,32 @@ function M3:CreateWindow(config)
             for _, t in pairs(WindowAPI.Tabs) do
                 t.Container.Visible = false
                 M3:Tween(t.Button, 0.25, Enum.EasingStyle.Quart, Enum.EasingDirection.Out, {
-                    BackgroundColor3 = M3.CurrentTheme.SurfaceContainer,
-                    TextColor3 = M3.CurrentTheme.OnSurfaceVariant
+                    BackgroundColor3 = M3.CurrentTheme.SurfaceContainer
                 })
+                if t.Text then
+                    M3:Tween(t.Text, 0.25, Enum.EasingStyle.Quart, Enum.EasingDirection.Out, {
+                        TextColor3 = M3.CurrentTheme.OnSurfaceVariant
+                    })
+                end
+                if t.Icon then
+                    M3:Tween(t.Icon, 0.25, Enum.EasingStyle.Quart, Enum.EasingDirection.Out, {
+                        ImageColor3 = M3.CurrentTheme.OnSurfaceVariant
+                    })
+                end
             end
             tabContent.Visible = true
             WindowAPI.CurrentTab = TabAPI
             M3:Tween(tabBtn, 0.25, Enum.EasingStyle.Quart, Enum.EasingDirection.Out, {
-                BackgroundColor3 = M3.CurrentTheme.PrimaryContainer,
+                BackgroundColor3 = M3.CurrentTheme.PrimaryContainer
+            })
+            M3:Tween(tabBtnText, 0.25, Enum.EasingStyle.Quart, Enum.EasingDirection.Out, {
                 TextColor3 = M3.CurrentTheme.OnPrimaryContainer
             })
+            if tabIcon then
+                M3:Tween(tabIcon, 0.25, Enum.EasingStyle.Quart, Enum.EasingDirection.Out, {
+                    ImageColor3 = M3.CurrentTheme.OnPrimaryContainer
+                })
+            end
         end
 
         tabBtn.MouseButton1Click:Connect(SelectTab)
@@ -1178,16 +1496,232 @@ function M3:CreateWindow(config)
                 end)
             end
 
-            function GroupAPI:AddSlider(text, minVal, maxVal, defaultVal, precise, callback)
-                minVal = minVal or 0
-                maxVal = maxVal or 100
-                if maxVal == minVal then
-                    maxVal = minVal + 1
+            -- MD3 Switch (переключатель): трек + ползунок, с иконками внутри (✓/✕) или без.
+            -- Group:AddSwitch(text, { Default=false, WithIcon=true, Enabled=true, Callback=fn })
+            --   или Group:AddSwitch(text, defaultState, callback)
+            function GroupAPI:AddSwitch(text, opts, legacyCallback)
+                local cfg = {}
+                if type(opts) == "table" then
+                    cfg = opts or {}
+                else
+                    cfg.Default = opts
+                    cfg.Callback = legacyCallback
                 end
-                defaultVal = math.clamp(defaultVal or minVal, minVal, maxVal)
+
+                local state = cfg.Default == true
+                local withIcon = cfg.WithIcon ~= false
+                local enabled = cfg.Enabled ~= false
+
+                local iconOn = withIcon and M3:LoadIcon("check") or ""
+                local iconOff = withIcon and M3:LoadIcon("close") or ""
+
+                local switchFrame = Instance.new("TextButton")
+                switchFrame.Size = UDim2.new(1, 0, 0, 44)
+                switchFrame.BackgroundColor3 = M3.CurrentTheme.SurfaceContainerHigh
+                switchFrame.Text = ""
+                switchFrame.ZIndex = 5
+                switchFrame.Parent = groupFrame
+
+                local switchCorner = Instance.new("UICorner")
+                switchCorner.CornerRadius = UDim.new(0, 12)
+                switchCorner.Parent = switchFrame
+                M3:PressMorph(switchCorner, UDim.new(0, 12))
+
+                local label = Instance.new("TextLabel")
+                label.Text = text
+                label.Font = M3.CurrentTheme.Font
+                label.TextSize = 13
+                label.TextColor3 = M3.CurrentTheme.OnSurface
+                label.Position = UDim2.new(0, 12, 0, 0)
+                label.Size = UDim2.new(1, -90, 1, 0)
+                label.BackgroundTransparency = 1
+                label.TextXAlignment = Enum.TextXAlignment.Left
+                label.ZIndex = 6
+                label.Parent = switchFrame
+
+                -- Трек (слева отступ, высота 28px как в MD3)
+                local switchTrack = Instance.new("Frame")
+                switchTrack.Size = UDim2.new(0, 56, 0, 28)
+                switchTrack.Position = UDim2.new(1, -68, 0.5, -14)
+                switchTrack.BackgroundColor3 = state and M3.CurrentTheme.Primary or M3.CurrentTheme.SurfaceContainerHighest
+                switchTrack.ZIndex = 6
+                switchTrack.Parent = switchFrame
+
+                local trackCorner = Instance.new("UICorner")
+                trackCorner.CornerRadius = UDim.new(1, 0)
+                trackCorner.Parent = switchTrack
+
+                -- Ползунок (круглый, растёт при включении и при нажатии)
+                local switchKnob = Instance.new("Frame")
+                switchKnob.Size = UDim2.new(0, state and 24 or 16, 0, state and 24 or 16)
+                switchKnob.Position = state and UDim2.new(1, -28, 0.5, -12) or UDim2.new(0, 2, 0.5, -8)
+                switchKnob.BackgroundColor3 = state and M3.CurrentTheme.OnPrimary or M3.CurrentTheme.Outline
+                switchKnob.ZIndex = 8
+                switchKnob.Parent = switchTrack
+
+                local knobCorner = Instance.new("UICorner")
+                knobCorner.CornerRadius = UDim.new(1, 0)
+                knobCorner.Parent = switchKnob
+
+                local knobIcon
+                if withIcon then
+                    knobIcon = Instance.new("ImageLabel")
+                    knobIcon.Size = UDim2.new(0, 14, 0, 14)
+                    knobIcon.Position = UDim2.new(0.5, -7, 0.5, -7)
+                    knobIcon.BackgroundTransparency = 1
+                    knobIcon.Image = state and iconOn or iconOff
+                    knobIcon.ImageColor3 = state and M3.CurrentTheme.Primary or M3.CurrentTheme.SurfaceContainerHighest
+                    knobIcon.ScaleType = Enum.ScaleType.Fit
+                    knobIcon.ZIndex = 9
+                    knobIcon.Parent = switchKnob
+                end
+
+                local function applyColors()
+                    local onCol = enabled and M3.CurrentTheme.Primary or M3.CurrentTheme.SurfaceContainerHighest
+                    local offCol = enabled and M3.CurrentTheme.SurfaceContainerHighest or M3.CurrentTheme.SurfaceContainerHighest
+                    local knobCol = enabled and (state and M3.CurrentTheme.OnPrimary or M3.CurrentTheme.Outline) or M3.CurrentTheme.SurfaceContainerHighest
+                    switchTrack.BackgroundColor3 = state and onCol or offCol
+                    switchKnob.BackgroundColor3 = knobCol
+                    if knobIcon then
+                        knobIcon.Image = state and iconOn or (iconOff ~= "" and iconOff or iconOn)
+                        knobIcon.ImageColor3 = state and M3.CurrentTheme.Primary or M3.CurrentTheme.SurfaceContainerHighest
+                    end
+                end
+
+                local function SetState(newState, pressed)
+                    state = newState
+                    local push = (enabled and pressed) and 6 or 0
+                    local knobSize = (state and 24 or 16) + push
+                    local knobPos
+                    if state then
+                        knobPos = UDim2.new(1, -28 - push / 2 - 0, 0.5, -knobSize / 2)
+                    else
+                        knobPos = UDim2.new(0, 2 - push / 2, 0.5, -knobSize / 2 + 0)
+                    end
+                    M3:Tween(switchTrack, 0.25, Enum.EasingStyle.Quart, Enum.EasingDirection.Out, {
+                        BackgroundColor3 = state and M3.CurrentTheme.Primary or M3.CurrentTheme.SurfaceContainerHighest
+                    })
+                    M3:Tween(switchKnob, 0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out, {
+                        Size = UDim2.new(0, knobSize, 0, knobSize),
+                        Position = knobPos,
+                        BackgroundColor3 = state and M3.CurrentTheme.OnPrimary or M3.CurrentTheme.Outline
+                    })
+                    if knobIcon then
+                        M3:Tween(knobIcon, 0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.Out, {
+                            Image = state and iconOn or (iconOff ~= "" and iconOff or iconOn)
+                        })
+                    end
+                    if not pressed then
+                        if cfg.Callback then cfg.Callback(state) end
+                    end
+                end
+
+                switchFrame.MouseButton1Down:Connect(function()
+                    if not enabled then return end
+                    if floated then floated = false return end
+                    -- сжатие ползунка при нажатии
+                    SetState(state, true)
+                end)
+
+                switchFrame.MouseButton1Up:Connect(function()
+                    if not enabled then return end
+                    local newState = not state
+                    -- отпускаем — ползунок возвращается к нормальному размеру и переключается
+                    SetState(newState, false)
+                end)
+
+                applyColors()
+
+                -- Программное управление
+                return {
+                    GetState = function() return state end,
+                    SetState = function(v)
+                        SetState(v == true, false)
+                    end,
+                    SetEnabled = function(v)
+                        enabled = v == true
+                        applyColors()
+                    end
+                }
+            end
+
+            function GroupAPI:AddSlider(text, minVal, maxVal, defaultVal, opts, legacyCallback)
+                -- Flexible API: positional text,min,max,value OR a single options table
+                local cfg = {}
+                if type(minVal) == "table" then
+                    -- AddSlider(text, {Min=,Max=,Value=,Style=,Step=,Precise=,Callback=})
+                    cfg = minVal
+                    text = text
+                else
+                    cfg.Min = minVal
+                    cfg.Max = maxVal
+                    cfg.Value = defaultVal
+                    if type(opts) == "table" then
+                        cfg.Style = opts.Style
+                        cfg.Step = opts.Step
+                        cfg.Precise = opts.Precise
+                        cfg.Callback = opts.Callback
+                        cfg.RangeMin = opts.RangeMin
+                        cfg.RangeMax = opts.RangeMax
+                        cfg.ShowValue = opts.ShowValue
+                    else
+                        cfg.Precise = (type(opts) == "boolean") and opts or nil
+                    end
+                    cfg.Callback = cfg.Callback or legacyCallback
+                end
+
+                local style = (cfg.Style or "Continuous"):lower()
+                local min = tonumber(cfg.Min) or 0
+                local max = tonumber(cfg.Max) or 100
+                local step = tonumber(cfg.Step) or 1
+                local precise = cfg.Precise == true
+                local showValue = cfg.ShowValue ~= false
+                if max == min then max = min + 1 end
+
+                local rangeMin = cfg.RangeMin ~= nil and tonumber(cfg.RangeMin) or min
+                local rangeMax = cfg.RangeMax ~= nil and tonumber(cfg.RangeMax) or max
+                local isRange = style == "range"
+                local isCentered = style == "centered"
+
+                -- Centered: mid is zero; supports negative/positive symmetric min/max
+                local centerVal = (min + max) / 2
+
+                -- Values (single) or [low, high] (range)
+                local snap = (style == "discrete" or isRange)
+                local function roundVal(v)
+                    v = math.clamp(v, min, max)
+                    if precise then
+                        return math.floor(v * 100 + 0.5) / 100
+                    end
+                    if snap then
+                        local s = step or 1
+                        if s <= 0 then s = 1 end
+                        return min + math.round((v - min) / s) * s
+                    end
+                    return v
+                end
+
+                local function roundValRange(v)
+                    if precise then
+                        return math.floor(v * 100 + 0.5) / 100
+                    end
+                    local s = step or 1
+                    if s <= 0 then s = 1 end
+                    return rangeMin + math.round((v - rangeMin) / s) * s
+                end
+
+                local val
+                if isRange then
+                    val = {
+                        math.clamp(cfg.Value ~= nil and cfg.Value[1] or rangeMin, rangeMin, rangeMax),
+                        math.clamp(cfg.Value ~= nil and cfg.Value[2] or rangeMax, rangeMin, rangeMax),
+                    }
+                else
+                    val = math.clamp(cfg.Value or centerVal, min, max)
+                end
 
                 local sliderFrame = Instance.new("Frame")
-                sliderFrame.Size = UDim2.new(1, 0, 0, 50)
+                sliderFrame.Size = UDim2.new(1, 0, 0, 64)
                 sliderFrame.BackgroundColor3 = M3.CurrentTheme.SurfaceContainerHigh
                 sliderFrame.ZIndex = 5
                 sliderFrame.Parent = groupFrame
@@ -1209,76 +1743,302 @@ function M3:CreateWindow(config)
                 label.Parent = sliderFrame
 
                 local valLabel = Instance.new("TextLabel")
-                valLabel.Text = tostring(defaultVal)
                 valLabel.Font = M3.CurrentTheme.FontBold
                 valLabel.TextSize = 13
                 valLabel.TextColor3 = M3.CurrentTheme.Primary
-                valLabel.Position = UDim2.new(0.6, 0, 0, 6)
-                valLabel.Size = UDim2.new(0.4, -12, 0, 18)
+                valLabel.Position = UDim2.new(0.5, 0, 0, 6)
+                valLabel.Size = UDim2.new(0.5, -12, 0, 18)
                 valLabel.BackgroundTransparency = 1
                 valLabel.TextXAlignment = Enum.TextXAlignment.Right
                 valLabel.ZIndex = 6
                 valLabel.Parent = sliderFrame
+                if not showValue then valLabel.Visible = false end
 
+                -- Track container (clickable)
                 local track = Instance.new("TextButton")
                 track.Name = "Track"
-                track.Size = UDim2.new(1, -24, 0, 8)
-                track.Position = UDim2.new(0, 12, 0, 32)
-                track.BackgroundColor3 = M3.CurrentTheme.SurfaceContainerHighest
+                track.Size = UDim2.new(1, -24, 0, 20)
+                track.Position = UDim2.new(0, 12, 0, 30)
+                track.BackgroundColor3 = Color3.fromRGB(40, 40, 48)
+                track.BackgroundTransparency = 1
                 track.Text = ""
                 track.ZIndex = 6
                 track.Parent = sliderFrame
 
-                local trackCorner = Instance.new("UICorner")
-                trackCorner.CornerRadius = UDim.new(1, 0)
-                trackCorner.Parent = track
+                -- Inactive track line (full width)
+                local trackLine = Instance.new("Frame")
+                trackLine.Size = UDim2.new(1, 0, 0, 4)
+                trackLine.Position = UDim2.new(0, 0, 0.5, -2)
+                trackLine.BackgroundColor3 = M3.CurrentTheme.SurfaceContainerHighest
+                trackLine.BorderSizePixel = 0
+                trackLine.ZIndex = 7
+                trackLine.Parent = track
 
+                local trackLineCorner = Instance.new("UICorner")
+                trackLineCorner.CornerRadius = UDim.new(1, 0)
+                trackLineCorner.Parent = trackLine
+
+                -- Active fill (dimension differs per style)
                 local fill = Instance.new("Frame")
-                fill.Size = UDim2.new((defaultVal - minVal)/(maxVal - minVal), 0, 1, 0)
                 fill.BackgroundColor3 = M3.CurrentTheme.Primary
                 fill.BorderSizePixel = 0
-                fill.ZIndex = 7
+                fill.ZIndex = 8
                 fill.Parent = track
-
                 local fillCorner = Instance.new("UICorner")
                 fillCorner.CornerRadius = UDim.new(1, 0)
                 fillCorner.Parent = fill
+                if isCentered then
+                    fill.Size = UDim2.new(0, 0, 1, 0)
+                elseif isRange then
+                    fill.Size = UDim2.new(0, 0, 1, 0)
+                else
+                    fill.AnchorPoint = Vector2.new(0, 0.5)
+                    fill.Position = UDim2.new(0, 0, 0.5, -2)
+                    fill.Size = UDim2.new(0, 0, 0, 4)
+                end
 
-                local draggingSlider = false
-                local function RoundVal(val)
-                    if not precise then
-                        return math.floor(val + 0.5)
-                    else
-                        return math.floor(val * 100 + 0.5) / 100
+                -- Thumb handle(s)
+                local function makeThumb()
+                    local thumb = Instance.new("Frame")
+                    thumb.Size = UDim2.new(0, 16, 0, 16)
+                    thumb.AnchorPoint = Vector2.new(0.5, 0.5)
+                    thumb.BackgroundColor3 = M3.CurrentTheme.Primary
+                    thumb.ZIndex = 9
+                    thumb.Parent = track
+
+                    local c = Instance.new("UICorner")
+                    c.CornerRadius = UDim.new(1, 0)
+                    c.Parent = thumb
+
+                    local stroke = Instance.new("UIStroke")
+                    stroke.Color = M3.CurrentTheme.Surface
+                    stroke.Thickness = 2
+                    stroke.Parent = thumb
+
+                    return thumb
+                end
+
+                local thumbSingle
+                local thumbLow, thumbHigh
+
+                if isRange then
+                    thumbLow = makeThumb()
+                    thumbHigh = makeThumb()
+                else
+                    thumbSingle = makeThumb()
+                end
+
+                -- Discrete tick marks
+                local tickContainer
+                if style == "discrete" then
+                    tickContainer = Instance.new("Frame")
+                    tickContainer.Size = UDim2.new(1, 0, 0, 4)
+                    tickContainer.Position = UDim2.new(0, 0, 0.5, -2)
+                    tickContainer.BackgroundTransparency = 1
+                    tickContainer.ZIndex = 7
+                    tickContainer.Parent = track
+                    local tickCount = math.floor((max - min) / step) + 1
+                    if tickCount > 40 then tickCount = 40 end
+                    if tickCount > 1 then
+                        for i = 0, tickCount - 1 do
+                            local tick = Instance.new("Frame")
+                            local x = (i / (tickCount - 1))
+                            tick.Size = UDim2.new(0, 1, 1, 0)
+                            tick.Position = UDim2.new(x, -0.5, 0, 0)
+                            tick.BackgroundColor3 = M3.CurrentTheme.OnSurfaceVariant
+                            tick.BorderSizePixel = 0
+                            tick.ZIndex = 7
+                            tick.Parent = tickContainer
+                        end
                     end
                 end
-                local function UpdateSlider(input)
-                    local pct = math.clamp((input.Position.X - track.AbsolutePosition.X) / track.AbsoluteSize.X, 0, 1)
-                    local val = minVal + (maxVal - minVal) * pct
-                    val = RoundVal(val)
-                    fill.Size = UDim2.new((val - minVal)/(maxVal - minVal), 0, 1, 0)
-                    valLabel.Text = tostring(val)
-                    callback(val)
+
+                -- Discrete value popup label
+                local popup
+                if style == "discrete" then
+                    popup = Instance.new("Frame")
+                    popup.Size = UDim2.new(0, 42, 0, 28)
+                    popup.AnchorPoint = Vector2.new(0.5, 0.5)
+                    popup.BackgroundColor3 = M3.CurrentTheme.Primary
+                    popup.ZIndex = 20
+                    popup.Visible = false
+                    popup.Parent = track
+
+                    local pcorner = Instance.new("UICorner")
+                    pcorner.CornerRadius = UDim.new(0, 8)
+                    pcorner.Parent = popup
+
+                    local plabel = Instance.new("TextLabel")
+                    plabel.Size = UDim2.new(1, 0, 1, 0)
+                    plabel.BackgroundTransparency = 1
+                    plabel.TextColor3 = M3.CurrentTheme.OnPrimary
+                    plabel.Font = M3.CurrentTheme.FontBold
+                    plabel.TextSize = 12
+                    plabel.Text = ""
+                    plabel.Parent = popup
+                end
+
+                -- Mapping value <-> pixel X (linear in all styles; centered only changes fill origin)
+                local trackW = track.AbsoluteSize.X
+                local function valueToPct(v)
+                    return (v - min) / (max - min)
+                end
+                local function pctToValue(pct)
+                    return min + (max - min) * pct
+                end
+
+                local function paint()
+                    if not trackLine then return end
+                    trackW = math.max(track.AbsoluteSize.X, 1)
+
+                    local function placeFill(v1, v2)
+                        local p1 = valueToPct(math.clamp(v1, min, max))
+                        local p2 = valueToPct(math.clamp(v2, min, max))
+                        local x1 = p1 * trackW
+                        local x2 = p2 * trackW
+                        fill.Position = UDim2.new(0, x1, 0, 0)
+                        fill.Size = UDim2.new(0, math.max(0, x2 - x1), 1, 0)
+                    end
+
+                    if isCentered then
+                        local cv = valueToPct(centerVal)
+                        local vv = valueToPct(val)
+                        local xc = cv * trackW
+                        local xv = vv * trackW
+                        fill.AnchorPoint = Vector2.new(0, 0)
+                        fill.Position = UDim2.new(0, math.min(xc, xv), 0, 0)
+                        fill.Size = UDim2.new(0, math.abs(xv - xc), 1, 0)
+                        if thumbSingle then
+                            thumbSingle.Position = UDim2.new(vv, 0, 0.5, 0)
+                        end
+                    elseif isRange then
+                        placeFill(val[1], val[2])
+                        if thumbLow then thumbLow.Position = UDim2.new(valueToPct(val[1]), 0, 0.5, 0) end
+                        if thumbHigh then thumbHigh.Position = UDim2.new(valueToPct(val[2]), 0, 0.5, 0) end
+                    else
+                        local p = valueToPct(val)
+                        fill.Position = UDim2.new(0, 0, 0.5, -2)
+                        fill.Size = UDim2.new(p, 0, 0, 4)
+                        if thumbSingle then
+                            thumbSingle.Position = UDim2.new(p, 0, 0.5, 0)
+                        end
+                    end
+
+                    if popup and thumbSingle then
+                        popup.Position = UDim2.new(valueToPct(val), 0, -0.5, 0)
+                        plabel.Text = tostring(val)
+                    end
+
+                    -- Update value labels
+                    if isRange then
+                        valLabel.Text = tostring(val[1]) .. " - " .. tostring(val[2])
+                    else
+                        valLabel.Text = tostring(val)
+                    end
+                end
+
+                local dragging = false
+                local dragIdx = nil
+                local function pixelToValue(x)
+                    local pct = math.clamp((x - track.AbsolutePosition.X) / track.AbsoluteSize.X, 0, 1)
+                    return pctToValue(pct)
+                end
+
+                local function apply(v, idx)
+                    if precise then
+                        if isRange then
+                            val[idx] = math.round(v * 100) / 100
+                        else
+                            val = math.round(v * 100) / 100
+                        end
+                    else
+                        if isRange then
+                            val[idx] = roundValRange(v)
+                        else
+                            val = roundVal(v)
+                        end
+                    end
+                    paint()
+                    if isRange then
+                        if cfg.Callback then cfg.Callback(val[1], val[2]) end
+                    else
+                        if cfg.Callback then cfg.Callback(val) end
+                    end
+                end
+
+                local function onDrag(input)
+                    local v = pixelToValue(input.Position.X)
+                    if isRange then
+                        local idx = dragIdx
+                        if idx == nil then
+                            -- choose nearest thumb
+                            local p = valueToPct(v)
+                            local p1 = valueToPct(val[1])
+                            local p2 = valueToPct(val[2])
+                            idx = (math.abs(p - p1) <= math.abs(p - p2)) and 1 or 2
+                            dragIdx = idx
+                        end
+                        apply(v, idx)
+                        -- keep low <= high
+                        if val[1] > val[2] then
+                            val[1], val[2] = val[2], val[1]
+                            paint()
+                        end
+                    else
+                        apply(v)
+                    end
                 end
 
                 track.InputBegan:Connect(function(input)
                     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-                        draggingSlider = true
-                        UpdateSlider(input)
+                        dragging = true
+                        dragIdx = nil
+                        if style == "discrete" and popup then
+                            popup.Visible = true
+                            paint()
+                        end
+                        onDrag(input)
                     end
                 end)
 
-                UserInputService.InputChanged:Connect(function(input)
-                    if draggingSlider and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-                        UpdateSlider(input)
+                local sliderChangedConn = UserInputService.InputChanged:Connect(function(input)
+                    if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+                        onDrag(input)
                     end
                 end)
+                M3:TrackConnection(sliderChangedConn)
 
-                UserInputService.InputEnded:Connect(function(input)
+                local sliderEndedConn = UserInputService.InputEnded:Connect(function(input)
                     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-                        draggingSlider = false
+                        dragging = false
+                        dragIdx = nil
+                        if popup then popup.Visible = false end
                     end
                 end)
+                M3:TrackConnection(sliderEndedConn)
+
+                paint()
+
+                -- Return a handle to read/set values programmatically
+                return {
+                    GetValue = function()
+                        if isRange then return val[1], val[2] end
+                        return val
+                    end,
+                    SetValue = function(v)
+                        if isRange then
+                            val[1] = math.clamp(v[1] or val[1], rangeMin, rangeMax)
+                            val[2] = math.clamp(v[2] or val[2], rangeMin, rangeMax)
+                            if val[1] > val[2] then val[1], val[2] = val[2], val[1] end
+                            paint()
+                            if cfg.Callback then cfg.Callback(val[1], val[2]) end
+                        else
+                            val = math.clamp(v, min, max)
+                            paint()
+                            if cfg.Callback then cfg.Callback(val) end
+                        end
+                    end
+                }
             end
 
             function GroupAPI:AddDropdown(text, options, defaultSelected, multiSelect, callback)
@@ -1661,6 +2421,7 @@ function M3:Cleanup()
     M3.ActiveWindows = {}
     M3.ActiveSubWindows = {}
     M3.FloatingWindows = {}
+    M3.ActiveNotifs = {}
     M3.IsHidden = false
     if ScreenGui then
         ScreenGui:Destroy()
