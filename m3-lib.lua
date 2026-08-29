@@ -583,16 +583,20 @@ function M3:ShowLoading(title)
     local root = Instance.new("Frame")
     root.Name = "M3_Loading"
     root.Size = UDim2.new(1, 0, 1, 0)
-    root.BackgroundColor3 = M3.CurrentTheme.Surface
+    root.BackgroundTransparency = 1
     root.ZIndex = 1000
     root.Parent = ScreenGui
 
     local dim = Instance.new("Frame")
     dim.Size = UDim2.new(1, 0, 1, 0)
     dim.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-    dim.BackgroundTransparency = 0.4
+    dim.BackgroundTransparency = 0.25
     dim.ZIndex = 1000
     dim.Parent = root
+
+    local blur = Instance.new("UIBlur")
+    blur.Size = UDim.new(16, 0)
+    blur.Parent = dim
 
     -- Centered card
     local card = Instance.new("Frame")
@@ -637,40 +641,6 @@ function M3:ShowLoading(title)
     statusLabel.ZIndex = 1002
     statusLabel.Parent = card
 
-    -- Spinner ring (donut outline + orbiting dot)
-    local ring = Instance.new("Frame")
-    ring.Size = UDim2.new(0, 48, 0, 48)
-    ring.Position = UDim2.new(0.5, -24, 1, -96)
-    ring.BackgroundTransparency = 1
-    ring.ZIndex = 1002
-    ring.Parent = card
-
-    local ringStroke = Instance.new("UIStroke")
-    ringStroke.Color = M3.CurrentTheme.SurfaceContainerHighest
-    ringStroke.Thickness = 4
-    ringStroke.Parent = ring
-
-    local ringCorner = Instance.new("UICorner")
-    ringCorner.CornerRadius = UDim.new(1, 0)
-    ringCorner.Parent = ring
-
-    local dot = Instance.new("Frame")
-    dot.Size = UDim2.new(0, 10, 0, 10)
-    dot.Position = UDim2.new(0.5, -5, 0, -5)
-    dot.BackgroundColor3 = M3.CurrentTheme.Primary
-    dot.ZIndex = 1003
-    dot.Parent = ring
-    local dotCorner = Instance.new("UICorner")
-    dotCorner.CornerRadius = UDim.new(1, 0)
-    dotCorner.Parent = dot
-
-    -- add rotation loop
-    local spinConn = RunService.RenderStepped:Connect(function(dt)
-        if not ring or not ring.Parent then return end
-        ring.Rotation = (ring.Rotation + dt * 320) % 360
-    end)
-    M3:TrackConnection(spinConn)
-
     -- Progress bar
     local prog = Instance.new("Frame")
     prog.Size = UDim2.new(0.5, 0, 0, 3)
@@ -710,7 +680,9 @@ function M3:ShowLoading(title)
     local api = {
         Root = root,
         SetProgress = function(n, text)
-            n = math.clamp(n, 0, 1)
+            n = tonumber(n) or 0
+            if n < 0 then n = 0 end
+            if n > 1 then n = 1 end
             if progFill then
                 M3:Tween(progFill, 0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.Out, {
                     Size = UDim2.new(n, 0, 1, 0)
