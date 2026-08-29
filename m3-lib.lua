@@ -587,15 +587,7 @@ function M3:ShowLoading(title)
     root.ZIndex = 1000
     root.Parent = ScreenGui
 
-    -- Light dim overlay (UIBlur isn't available in all environments, so keep it simple)
-    local dim = Instance.new("Frame")
-    dim.Size = UDim2.new(1, 0, 1, 0)
-    dim.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-    dim.BackgroundTransparency = 0.45
-    dim.ZIndex = 1000
-    dim.Parent = root
-
-    -- Centered card
+    -- Centered card (no dark overlay on purpose)
     local card = Instance.new("Frame")
     card.Size = UDim2.new(0, 320, 0, 200)
     card.Position = UDim2.new(0.5, -160, 0.5, -100)
