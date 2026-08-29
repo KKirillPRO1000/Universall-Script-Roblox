@@ -511,6 +511,26 @@ function M3:HttpGetTimeout(url, seconds)
     return result
 end
 
+M3.Round = function(v, digits)
+    if type(v) ~= "number" then return v end
+    if v ~= v or v == math.huge or v == -math.huge then return v end
+    digits = math.floor(digits or 10)
+    if digits < 0 then digits = 0 elseif digits > 14 then digits = 14 end
+    local r = tonumber(string.format("%." .. digits .. "f", v))
+    return r or v
+end
+
+M3.FormatNum = function(v, digits)
+    if type(v) ~= "number" then return tostring(v) end
+    if v ~= v or v == math.huge or v == -math.huge then return tostring(v) end
+    digits = math.floor(digits or 10)
+    if digits < 0 then digits = 0 elseif digits > 14 then digits = 14 end
+    local s = string.format("%." .. digits .. "f", v)
+    s = s:gsub("^(.-)0+$", "%1"):gsub("^(-?)%.$", "%1")
+    if s == "-0" then s = "0" end
+    return s
+end
+
 
 
 
@@ -997,28 +1017,18 @@ table.insert(M3.ActiveNotifs, n)
         heartbeat = RunService.Heartbeat:Connect(function(dt)
             if n.Closing then return end
             if paused then return end
-            if remaining > 0 then
-                remaining = remaining - dt
-                if remaining < 0 then remaining = 0 end
-                timerBar.Size = UDim2.new(remaining / total, -24, 0, BAR_H)
-                if remaining <= 0 then
-                    M3.HideNotif(n, "timeout")
-                end
+            remaining = remaining - dt
+            if remaining <= 0 then
+                M3.HideNotif(n, "timeout")
+                return
             end
+            timerBar.Size = UDim2.new(remaining / total, -24, 0, BAR_H)
         end)
         M3:TrackConnection(heartbeat)
     end
 
     
-    card.MouseEnter:Connect(function()
-        paused = true
-    end)
-    card.MouseLeave:Connect(function()
-        if not dragging then paused = false end
-    end)
-
-    
-    local dragging = false
+local dragging = false
     local dragStartMouse
     local dragStartPos
 
@@ -1049,9 +1059,9 @@ local dragEnded = UserInputService.InputEnded:Connect(function(input)
             local dxX = card.Position.X.Offset
             local dyDown = card.Position.Y.Offset - n.SlotY
             paused = false
-            if dxX > 120 then
+            if dxX > 80 then
                 M3.HideNotif(n, "right")
-            elseif dyDown > 90 then
+            elseif dyDown > 70 then
                 M3.HideNotif(n, "down")
             else
                 M3:Tween(card, 0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out, {
@@ -1121,61 +1131,111 @@ function M3:ReflowNotifs()
     end
 end
 
-function M3:CreateFloatingWindow(elementName, contentConstructFn)
+function M3:CreateFloatingWindow(elementName, contentConstructFn, opts)
+    if M3.FloatingByName == nil then M3.FloatingByName = {} end
+    opts = opts or {}
+    local old = M3.FloatingByName[elementName]
+    if old and old.Destroy then
+        pcall(old.Destroy)
+    end
+
+    local function normRadius(r, fallback)
+        if r == nil then return fallback end
+        if typeof(r) == "UDim" then return r end
+        if type(r) == "number" then return UDim.new(0, r) end
+        return fallback
+    end
+
+    local cornerRadius = normRadius(opts.CornerRadius, M3.CurrentTheme.CornerRadius)
+    local floatSize = opts.Size or UDim2.new(0, 240, 0, 110)
+    local floatPos = opts.Position or UDim2.new(0.5, -floatSize.X.Offset / 2, 0.4, -floatSize.Y.Offset / 2)
+    local hideTopBar = opts.HideTopBar == true
+    local titleText = opts.Title or ("Floating: " .. elementName)
+    local barH = hideTopBar and 0 or 30
+
     local floatFrame = Instance.new("Frame")
     floatFrame.Name = "M3_Floating_" .. elementName
-    floatFrame.Size = UDim2.new(0, 240, 0, 110)
-    floatFrame.Position = UDim2.new(0.5, -120, 0.4, -55)
-    floatFrame.BackgroundColor3 = M3.CurrentTheme.SurfaceContainerHigh
+    floatFrame.Size = floatSize
+    floatFrame.Position = floatPos
+    floatFrame.BackgroundColor3 = opts.BackgroundColor3 or M3.CurrentTheme.SurfaceContainerHigh
     floatFrame.ClipsDescendants = true
     floatFrame.Parent = ScreenGui
 
     local corner = Instance.new("UICorner")
-    corner.CornerRadius = M3.CurrentTheme.CornerRadius
+    corner.CornerRadius = cornerRadius
     corner.Parent = floatFrame
 
     local stroke = Instance.new("UIStroke")
-    stroke.Color = M3.CurrentTheme.Primary
-    stroke.Thickness = 1.5
+    stroke.Color = opts.StrokeColor3 or M3.CurrentTheme.Primary
+    stroke.Thickness = opts.StrokeThickness or 1.5
     stroke.Parent = floatFrame
 
-    local topBar = Instance.new("Frame")
-    topBar.Size = UDim2.new(1, 0, 0, 30)
-    topBar.BackgroundColor3 = M3.CurrentTheme.SurfaceContainerHighest
-    topBar.BorderSizePixel = 0
-    topBar.Parent = floatFrame
+    local topClip
+    local topBar
+    local title
+    local closeBtn
+    if not hideTopBar then
+        topClip = Instance.new("Frame")
+        topClip.Size = UDim2.new(1, 0, 0, barH)
+        topClip.BackgroundTransparency = 1
+        topClip.ClipsDescendants = true
+        topClip.ZIndex = 4
+        topClip.Parent = floatFrame
 
-    local title = Instance.new("TextLabel")
-    title.Text = "Floating: " .. elementName
-    title.Font = M3.CurrentTheme.FontBold
-    title.TextSize = 12
-    title.TextColor3 = M3.CurrentTheme.OnSurface
-    title.Position = UDim2.new(0, 10, 0, 0)
-    title.Size = UDim2.new(1, -40, 1, 0)
-    title.BackgroundTransparency = 1
-    title.TextXAlignment = Enum.TextXAlignment.Left
-    title.Parent = topBar
+        local topClipCorner = Instance.new("UICorner")
+        topClipCorner.CornerRadius = cornerRadius
+        topClipCorner.Parent = topClip
 
-    local closeBtn = Instance.new("TextButton")
-    closeBtn.Size = UDim2.new(0, 24, 0, 24)
-    closeBtn.Position = UDim2.new(1, -27, 0, 3)
-    closeBtn.BackgroundTransparency = 1
-    closeBtn.Text = "X"
-    closeBtn.TextColor3 = M3.CurrentTheme.Error
-    closeBtn.Font = M3.CurrentTheme.FontBold
-    closeBtn.TextSize = 12
-    closeBtn.Parent = topBar
+        topBar = Instance.new("Frame")
+        topBar.Size = UDim2.new(1, 0, 1, 0)
+        topBar.BackgroundColor3 = opts.TopBarColor3 or M3.CurrentTheme.SurfaceContainerHighest
+        topBar.BorderSizePixel = 0
+        topBar.Parent = topClip
+
+        title = Instance.new("TextLabel")
+        title.Text = titleText
+        title.Font = M3.CurrentTheme.FontBold
+        title.TextSize = 12
+        title.TextColor3 = opts.TextColor3 or M3.CurrentTheme.OnSurface
+        title.Position = UDim2.new(0, 10, 0, 0)
+        title.Size = UDim2.new(1, -40, 1, 0)
+        title.BackgroundTransparency = 1
+        title.TextXAlignment = Enum.TextXAlignment.Left
+        title.Parent = topBar
+
+        closeBtn = Instance.new("TextButton")
+        closeBtn.Size = UDim2.new(0, 24, 0, 24)
+        closeBtn.Position = UDim2.new(1, -27, 0, 3)
+        closeBtn.BackgroundTransparency = 1
+        closeBtn.Text = "X"
+        closeBtn.TextColor3 = M3.CurrentTheme.Error
+        closeBtn.Font = M3.CurrentTheme.FontBold
+        closeBtn.TextSize = 12
+        closeBtn.Parent = topBar
+    end
 
     local body = Instance.new("Frame")
-    body.Size = UDim2.new(1, -16, 1, -38)
-    body.Position = UDim2.new(0, 8, 0, 34)
+    if hideTopBar then
+        body.Size = UDim2.new(1, -16, 1, -16)
+        body.Position = UDim2.new(0, 8, 0, 8)
+    else
+        body.Size = UDim2.new(1, -16, 1, -(barH + 8))
+        body.Position = UDim2.new(0, 8, 0, barH + 4)
+    end
     body.BackgroundTransparency = 1
     body.Parent = floatFrame
 
     contentConstructFn(body)
 
     local dragging, dragStart, startPos
-    local topBarBeganConn = topBar.InputBegan:Connect(function(input)
+    local topBarBeganConn
+    local inputChangedConn
+    local inputEndedConn
+    local closeClickConn
+
+    local head = topBar or floatFrame
+
+    topBarBeganConn = head.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             dragging = true
             dragStart = input.Position
@@ -1183,7 +1243,7 @@ function M3:CreateFloatingWindow(elementName, contentConstructFn)
         end
     end)
 
-    local inputChangedConn = UserInputService.InputChanged:Connect(function(input)
+    inputChangedConn = UserInputService.InputChanged:Connect(function(input)
         if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
             if floatFrame and floatFrame.Parent then
                 local delta = input.Position - dragStart
@@ -1192,7 +1252,7 @@ function M3:CreateFloatingWindow(elementName, contentConstructFn)
         end
     end)
 
-    local inputEndedConn = UserInputService.InputEnded:Connect(function(input)
+    inputEndedConn = UserInputService.InputEnded:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             dragging = false
         end
@@ -1202,20 +1262,32 @@ function M3:CreateFloatingWindow(elementName, contentConstructFn)
     M3:TrackConnection(inputChangedConn)
     M3:TrackConnection(inputEndedConn)
 
+    local handle
     local function DestroyFloat()
+        if M3.FloatingByName and M3.FloatingByName[elementName] == handle then
+            M3.FloatingByName[elementName] = nil
+        end
+        for i = #M3.FloatingWindows, 1, -1 do
+            if M3.FloatingWindows[i] == floatFrame then table.remove(M3.FloatingWindows, i) end
+        end
         if floatFrame and floatFrame.Parent then
             floatFrame:Destroy()
         end
         M3:Untrack(topBarBeganConn)
         M3:Untrack(inputChangedConn)
         M3:Untrack(inputEndedConn)
+        if closeClickConn then M3:Untrack(closeClickConn) end
     end
 
-    local closeClickConn = closeBtn.MouseButton1Click:Connect(function()
-        DestroyFloat()
-    end)
-    M3:TrackConnection(closeClickConn)
+    if closeBtn then
+        closeClickConn = closeBtn.MouseButton1Click:Connect(function()
+            DestroyFloat()
+        end)
+        M3:TrackConnection(closeClickConn)
+    end
 
+    handle = { Destroy = DestroyFloat }
+    M3.FloatingByName[elementName] = handle
     table.insert(M3.FloatingWindows, floatFrame)
     return floatFrame
 end
@@ -1835,8 +1907,57 @@ function M3:CreateWindow(config)
                     callback(state)
                 end
 
+                local knobDragging = false
+                local knobMoved = false
+                local knobSuppressClick = false
+
+                local function knobDragOffset()
+                    local trackX = switchTrack.AbsolutePosition.X
+                    local trackW = math.max(switchTrack.AbsoluteSize.X, 44)
+                    local mp = UserInputService:GetMouseLocation()
+                    if mp then
+                        return math.clamp(mp.X - trackX - 9, 3, trackW - 21)
+                    end
+                    return nil
+                end
+
+                switchKnob.InputBegan:Connect(function(input)
+                    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                        knobDragging = true
+                        knobMoved = false
+                        knobSuppressClick = true
+                    end
+                end)
+
+                local knobDragMoveConn = UserInputService.InputChanged:Connect(function(input)
+                    if knobDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+                        local off = knobDragOffset()
+                        if off then
+                            if math.abs(off - switchKnob.Position.X.Offset) > 1 then knobMoved = true end
+                            switchKnob.Position = UDim2.new(0, off, 0.5, -9)
+                        end
+                    end
+                end)
+                M3:TrackConnection(knobDragMoveConn)
+
+                local knobDragEndConn = UserInputService.InputEnded:Connect(function(input)
+                    if knobDragging and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
+                        knobDragging = false
+                        if knobMoved then
+                            local off = switchKnob.Position.X.Offset
+                            local trackW = math.max(switchTrack.AbsoluteSize.X, 44)
+                            SetState(off >= (trackW - 18) / 2)
+                        end
+                        delay(0.05, function()
+                            if not knobDragging then knobSuppressClick = false end
+                        end)
+                    end
+                end)
+                M3:TrackConnection(knobDragEndConn)
+
                 toggleFrame.MouseButton1Click:Connect(function()
                     if floated then floated = false return end
+                    if knobSuppressClick then return end
                     SetState(not state)
                 end)
 
@@ -1940,6 +2061,39 @@ function M3:CreateWindow(config)
                     knobIcon.Parent = switchKnob
                 end
 
+                local knobDragging = false
+                local knobMoved = false
+
+                local function switchKnobOffset()
+                    local trackX = switchTrack.AbsolutePosition.X
+                    local trackW = math.max(switchTrack.AbsoluteSize.X, 56)
+                    local ksz = switchKnob.Size.X.Offset
+                    local mp = UserInputService:GetMouseLocation()
+                    if mp then
+                        return math.clamp(mp.X - trackX - ksz / 2, 2, trackW - 28)
+                    end
+                    return nil
+                end
+
+                switchKnob.InputBegan:Connect(function(input)
+                    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                        knobDragging = true
+                        knobMoved = false
+                    end
+                end)
+
+                local knobDragMoveConn = UserInputService.InputChanged:Connect(function(input)
+                    if knobDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+                        local off = switchKnobOffset()
+                        if off then
+                            if math.abs(off - switchKnob.Position.X.Offset) > 1 then knobMoved = true end
+                            local ksz = switchKnob.Size.X.Offset
+                            switchKnob.Position = UDim2.new(0, off, 0.5, -ksz / 2)
+                        end
+                    end
+                end)
+                M3:TrackConnection(knobDragMoveConn)
+
                 local function applyColors()
                     local onCol = enabled and M3.CurrentTheme.Primary or M3.CurrentTheme.SurfaceContainerHighest
                     local offCol = enabled and M3.CurrentTheme.SurfaceContainerHighest or M3.CurrentTheme.SurfaceContainerHighest
@@ -1980,8 +2134,9 @@ function M3:CreateWindow(config)
                     end
                 end
 
-                switchFrame.MouseButton1Down:Connect(function()
+switchFrame.MouseButton1Down:Connect(function()
                     if not enabled then return end
+                    if knobDragging then return end
                     if floated then floated = false return end
                     
                     SetState(state, true)
@@ -1989,6 +2144,15 @@ function M3:CreateWindow(config)
 
                 switchFrame.MouseButton1Up:Connect(function()
                     if not enabled then return end
+                    if knobDragging then
+                        knobDragging = false
+                        if knobMoved then
+                            local off = switchKnob.Position.X.Offset
+                            local trackW = math.max(switchTrack.AbsoluteSize.X, 56)
+                            SetState(off >= (trackW - 28 + 2) / 2, false)
+                            return
+                        end
+                    end
                     local newState = not state
                     
                     SetState(newState, false)
@@ -2052,36 +2216,37 @@ function M3:CreateWindow(config)
 
                 
                 local snap = (style == "discrete" or isRange)
+                local valueDigits = precise and 2 or 4
                 local function roundVal(v)
                     v = math.clamp(v, min, max)
                     if precise then
-                        return math.floor(v * 100 + 0.5) / 100
+                        return M3.Round(v, 2)
                     end
                     if snap then
                         local s = step or 1
                         if s <= 0 then s = 1 end
-                        return min + math.round((v - min) / s) * s
+                        return M3.Round(min + math.round((v - min) / s) * s, valueDigits)
                     end
-                    return v
+                    return M3.Round(v, valueDigits)
                 end
 
                 local function roundValRange(v)
                     if precise then
-                        return math.floor(v * 100 + 0.5) / 100
+                        return M3.Round(v, 2)
                     end
                     local s = step or 1
                     if s <= 0 then s = 1 end
-                    return rangeMin + math.round((v - rangeMin) / s) * s
+                    return M3.Round(rangeMin + math.round((v - rangeMin) / s) * s, valueDigits)
                 end
 
                 local val
                 if isRange then
                     val = {
-                        math.clamp(cfg.Value ~= nil and cfg.Value[1] or rangeMin, rangeMin, rangeMax),
-                        math.clamp(cfg.Value ~= nil and cfg.Value[2] or rangeMax, rangeMin, rangeMax),
+                        roundValRange(math.clamp(cfg.Value ~= nil and cfg.Value[1] or rangeMin, rangeMin, rangeMax)),
+                        roundValRange(math.clamp(cfg.Value ~= nil and cfg.Value[2] or rangeMax, rangeMin, rangeMax)),
                     }
                 else
-                    val = math.clamp(cfg.Value or centerVal, min, max)
+                    val = roundVal(cfg.Value or centerVal)
                 end
 
                 local sliderFrame = Instance.new("Frame")
@@ -2288,16 +2453,16 @@ function M3:CreateWindow(config)
                         end
                     end
 
-                    if popup and thumbSingle then
+if popup and thumbSingle then
                         popup.Position = UDim2.new(valueToPct(val), 0, -0.5, 0)
-                        plabel.Text = tostring(val)
+                        plabel.Text = M3.FormatNum(val, valueDigits)
                     end
 
                     
                     if isRange then
-                        valLabel.Text = tostring(val[1]) .. " - " .. tostring(val[2])
+                        valLabel.Text = M3.FormatNum(val[1], valueDigits) .. " - " .. M3.FormatNum(val[2], valueDigits)
                     else
-                        valLabel.Text = tostring(val)
+                        valLabel.Text = M3.FormatNum(val, valueDigits)
                     end
                 end
 
@@ -2311,9 +2476,9 @@ function M3:CreateWindow(config)
                 local function apply(v, idx)
                     if precise then
                         if isRange then
-                            val[idx] = math.round(v * 100) / 100
+                            val[idx] = M3.Round(v, 2)
                         else
-                            val = math.round(v * 100) / 100
+                            val = M3.Round(v, 2)
                         end
                     else
                         if isRange then
@@ -2391,13 +2556,13 @@ function M3:CreateWindow(config)
                     end,
                     SetValue = function(v)
                         if isRange then
-                            val[1] = math.clamp(v[1] or val[1], rangeMin, rangeMax)
-                            val[2] = math.clamp(v[2] or val[2], rangeMin, rangeMax)
+                            val[1] = roundValRange(math.clamp(v[1] or val[1], rangeMin, rangeMax))
+                            val[2] = roundValRange(math.clamp(v[2] or val[2], rangeMin, rangeMax))
                             if val[1] > val[2] then val[1], val[2] = val[2], val[1] end
                             paint()
                             if cfg.Callback then cfg.Callback(val[1], val[2]) end
                         else
-                            val = math.clamp(v, min, max)
+                            val = roundVal(v)
                             paint()
                             if cfg.Callback then cfg.Callback(val) end
                         end
@@ -2794,6 +2959,7 @@ function M3:Cleanup()
     M3.ActiveWindows = {}
     M3.ActiveSubWindows = {}
     M3.FloatingWindows = {}
+    M3.FloatingByName = {}
     M3.ActiveNotifs = {}
     M3.IsHidden = false
 
