@@ -486,6 +486,31 @@ M3.ConfigManager = ConfigManager
 -- Icon cache for downloaded PNGs
 M3.IconCache = {}
 
+-- Fetch a URL with a hard timeout so a dead/slowed host can't hang the whole script.
+-- Returns the raw body string, or nil on failure/timeout.
+function M3:HttpGetTimeout(url, seconds)
+    seconds = seconds or 3
+    local result = nil
+    local done = false
+
+    local co = coroutine.create(function()
+        local ok, data = pcall(function() return game:HttpGet(url) end)
+        if ok and data then result = data end
+        done = true
+    end)
+
+    local okResume = coroutine.resume(co)
+    if not okResume then
+        done = true
+    end
+
+    local start = tick()
+    while not done and (tick() - start) < seconds do
+        wait(0.05)
+    end
+    return result
+end
+
 -- Resolve an icon reference to an Image property value for an ImageLabel/ImageButton.
 -- Accepts:
 --   * nil / "": empty (no icon)
@@ -513,8 +538,8 @@ function M3:LoadIcon(iconId)
         if getcustomasset and isfile and writefile then
             if M3.IconCache[str] then return M3.IconCache[str] end
             local fileName = "m3_icons/" .. string.gsub(str, "[^%w]", "_"):sub(1, 80) .. ".png"
-            local ok, data = pcall(function() return game:HttpGet(str) end)
-            if ok and data and #data > 100 then
+            local data = M3:HttpGetTimeout(str, 2.5)
+            if data and #data > 100 then
                 local saved = pcall(function()
                     if isfolder("m3_icons") == false then
                         makefolder("m3_icons")
@@ -546,8 +571,8 @@ function M3:LoadIcon(iconId)
         }
 
         for _, url in ipairs(sources) do
-            local ok, data = pcall(function() return game:HttpGet(url) end)
-            if ok and data and #data > 100 then
+            local data = M3:HttpGetTimeout(url, 2.5)
+            if data and #data > 100 then
                 local fileName = "m3_icons/" .. name .. ".png"
                 local saved = pcall(function()
                     if isfolder("m3_icons") == false then
@@ -695,15 +720,8 @@ end
 function M3:HideLoading()
     local api = M3.Loading
     M3.Loading = nil
-    if api and api.Root and api.Root.Parent then
-        pcall(function()
-            M3:Tween(api.Root, 0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.In, {
-                BackgroundTransparency = 1
-            })
-        end)
-        task.delay(0.31, function()
-            if api.Root and api.Root.Parent then api.Root:Destroy() end
-        end)
+    if api and api.Root then
+        pcall(function() api.Root:Destroy() end)
     end
 end
 
@@ -801,7 +819,7 @@ function M3:ShowDialog(options)
         M3:Tween(dim, 0.25, Enum.EasingStyle.Quart, Enum.EasingDirection.In, {
             BackgroundTransparency = 1
         })
-        task.delay(0.26, function()
+        delay(0.26, function()
             if root and root.Parent then root:Destroy() end
         end)
     end
@@ -1089,6 +1107,16 @@ function M3:Notify(options)
     }
     table.insert(M3.ActiveNotifs, n)
 
+    -- Enforce a stack limit of 5: retire the oldest (top) notification on overflow
+    while #M3.ActiveNotifs > 5 do
+        local oldest = M3.ActiveNotifs[1]
+        if oldest then
+            M3.HideNotif(oldest, "right")
+        else
+            break
+        end
+    end
+
     -- Entry: start off-screen (bottom-right), fly in to its slot
     card.AnchorPoint = Vector2.new(0, 1)
     card.Position = UDim2.new(1, 60, 0, n.SlotY - 6)
@@ -1211,7 +1239,7 @@ function M3:HideNotif(n, direction)
                 BackgroundTransparency = 1
             })
         end
-        task.delay(0.45, function()
+        delay(0.45, function()
             if card and card.Parent then card:Destroy() end
         end)
     end
@@ -1595,7 +1623,7 @@ function M3:CreateWindow(config)
             local sx, sy = targetSize.X * 0.6, targetSize.Y * 0.6
             mainFrame.Size = UDim2.new(0, sx, 0, sy)
             mainFrame.Position = UDim2.new(0, cx - sx / 2, 0, cy - sy / 2)
-            task.delay(0.03, function()
+            delay(0.03, function()
                 if not windowVisible then return end
                 if mainFrame and mainFrame.Parent then
                     M3:AnimateWindowResize(mainFrame, UDim2.new(0, targetSize.X, 0, targetSize.Y), 0.4)
@@ -1607,7 +1635,7 @@ function M3:CreateWindow(config)
             if w > 0 and h > 0 then
                 M3:AnimateWindowResize(mainFrame, UDim2.new(0, w * 0.7, 0, h * 0.7), 0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.In)
             end
-            task.delay(0.32, function()
+            delay(0.32, function()
                 if mainFrame and mainFrame.Parent then
                     mainFrame.Visible = false
                 end
@@ -1806,7 +1834,7 @@ function M3:CreateWindow(config)
                         holding = true
                         floated = false
                         holdTime = tick()
-                        task.delay(0.8, function()
+                        delay(0.8, function()
                             if holding and (tick() - holdTime >= 0.75) then
                                 holding = false
                                 floated = true
@@ -2726,7 +2754,7 @@ function M3:CreateWindow(config)
 
     -- Entrance animation: the freshly created window unfolds from the center
     if config.AnimateIn ~= false then
-        task.delay(0.1, function()
+        delay(0.1, function()
             if mainFrame and mainFrame.Parent then
                 M3:WindowEntrance(mainFrame, defaultSize, 0.5)
             end
