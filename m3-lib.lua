@@ -106,7 +106,7 @@ local M3 = {
 
 M3.CurrentTheme = M3.Themes.Dark
 
--- Cleanup registry: track connections, threads, and instances for auto-destruction
+
 function M3:TrackConnection(conn)
     if conn then
         table.insert(M3.CleanupTasks, {
@@ -242,9 +242,9 @@ function M3:Tween(instance, time, style, direction, props)
     return tween
 end
 
--- Resize a window while keeping its center fixed (works with default AnchorPoint 0,0).
--- Returns the target pixel size. Plays a single tween on Size+Position so the window
--- visually "unfolds" from / folds toward its center (nice for show/hide).
+
+
+
 function M3:AnimateWindowResize(frame, toSize, time, style, direction)
     time = time or 0.35
     style = style or Enum.EasingStyle.Quart
@@ -281,7 +281,7 @@ function M3:AnimateWindowResize(frame, toSize, time, style, direction)
     return UDim2.new(0, tx, 0, ty)
 end
 
--- Soft entrance: shrink the window to a fraction, then expand to the real size.
+
 function M3:WindowEntrance(frame, realSize, time)
     local parent = frame.Parent
     local pw, ph = 1280, 720
@@ -331,9 +331,9 @@ function M3:Ripple(button, x, y)
     end)
 end
 
--- MD3 press-morph: idle = rounded rectangle (light rounding), pressed = full pill, release = back.
--- `targetCorner` is the UICorner instance to animate; `idleRadius` is the idle corner radius.
--- Optional `triggerButton` overrides the button that fires the morph (defaults to targetCorner's ancestor TextButton).
+
+
+
 function M3:PressMorph(targetCorner, idleRadius, triggerButton)
     if not targetCorner then return end
     local idle = idleRadius or targetCorner.CornerRadius
@@ -361,10 +361,10 @@ function M3:PressMorph(targetCorner, idleRadius, triggerButton)
     M3:TrackConnection(e)
 end
 
--- Recolor every existing themed element under the main ScreenGui.
--- Works by matching each element's current color/radius against the OLD theme
--- and replacing it with the matching value from the NEW (current) theme.
--- No per-component tagging needed.
+
+
+
+
 function M3:RecolorAll(oldTheme)
     if not ScreenGui then return end
     oldTheme = oldTheme or {}
@@ -483,11 +483,11 @@ end
 
 M3.ConfigManager = ConfigManager
 
--- Icon cache for downloaded PNGs
+
 M3.IconCache = {}
 
--- Fetch a URL with a hard timeout so a dead/slowed host can't hang the whole script.
--- Returns the raw body string, or nil on failure/timeout.
+
+
 function M3:HttpGetTimeout(url, seconds)
     seconds = seconds or 3
     local result = nil
@@ -511,29 +511,29 @@ function M3:HttpGetTimeout(url, seconds)
     return result
 end
 
--- Resolve an icon reference to an Image property value for an ImageLabel/ImageButton.
--- Accepts:
---   * nil / "": empty (no icon)
---   * "rbxassetid://123..." or a plain number: treated as an asset id
---   * "http(s)://...": full custom URL (used as-is for getcustomasset download)
---   * a name (e.g. "cog", "home", "close"): downloads a Material Design icon PNG via writefile/getcustomasset, cached per session.
--- Returns an Image string, or "" if nothing usable could be resolved.
+
+
+
+
+
+
+
 function M3:LoadIcon(iconId)
     if iconId == nil or iconId == "" then return "" end
 
     local str = tostring(iconId)
 
-    -- Plain numeric asset id
+    
     if tonumber(str) then
         return "rbxassetid://" .. tostring(math.floor(tonumber(str)))
     end
 
-    -- Already a Roblox asset reference
+    
     if str:lower():match("^rbxassetid://") then
         return str
     end
 
-    -- Full http(s) URL: fetch and cache as a custom asset
+    
     if str:lower():match("^https?://") then
         if getcustomasset and isfile and writefile then
             if M3.IconCache[str] then return M3.IconCache[str] end
@@ -558,7 +558,7 @@ function M3:LoadIcon(iconId)
         return ""
     end
 
-    -- Named Material Design icon: try several hosted PNG mirrors
+    
     if getcustomasset and isfile and writefile then
         if M3.IconCache[str] then return M3.IconCache[str] end
 
@@ -594,140 +594,9 @@ function M3:LoadIcon(iconId)
     return ""
 end
 
--- ============================================================
--- Loading screen (MD3): full-screen overlay with spinner + progress bar
--- ============================================================
-M3.Loading = nil
 
-function M3:ShowLoading(title)
-    title = title or "M3"
-    if M3.Loading and M3.Loading.Root and M3.Loading.Root.Parent then
-        return M3.Loading
-    end
 
-    local root = Instance.new("Frame")
-    root.Name = "M3_Loading"
-    root.Size = UDim2.new(1, 0, 1, 0)
-    root.BackgroundTransparency = 1
-    root.ZIndex = 1000
-    root.Parent = ScreenGui
 
-    -- Centered card (no dark overlay on purpose)
-    local card = Instance.new("Frame")
-    card.Size = UDim2.new(0, 320, 0, 200)
-    card.Position = UDim2.new(0.5, -160, 0.5, -100)
-    card.BackgroundColor3 = M3.CurrentTheme.SurfaceContainerHigh
-    card.ZIndex = 1001
-    card.Parent = root
-
-    local cardCorner = Instance.new("UICorner")
-    cardCorner.CornerRadius = M3.CurrentTheme.CornerLarge
-    cardCorner.Parent = card
-
-    local cardStroke = Instance.new("UIStroke")
-    cardStroke.Color = M3.CurrentTheme.OutlineVariant
-    cardStroke.Thickness = 1
-    cardStroke.Parent = card
-
-    -- Title
-    local titleLabel = Instance.new("TextLabel")
-    titleLabel.Text = title
-    titleLabel.Font = M3.CurrentTheme.FontBold
-    titleLabel.TextSize = 18
-    titleLabel.TextColor3 = M3.CurrentTheme.OnSurface
-    titleLabel.Position = UDim2.new(0, 20, 0, 18)
-    titleLabel.Size = UDim2.new(1, -40, 0, 26)
-    titleLabel.BackgroundTransparency = 1
-    titleLabel.TextXAlignment = Enum.TextXAlignment.Left
-    titleLabel.ZIndex = 1002
-    titleLabel.Parent = card
-
-    -- Subtitle / status
-    local statusLabel = Instance.new("TextLabel")
-    statusLabel.Text = "Loading..."
-    statusLabel.Font = M3.CurrentTheme.Font
-    statusLabel.TextSize = 13
-    statusLabel.TextColor3 = M3.CurrentTheme.OnSurfaceVariant
-    statusLabel.Position = UDim2.new(0, 20, 0, 48)
-    statusLabel.Size = UDim2.new(1, -40, 0, 20)
-    statusLabel.BackgroundTransparency = 1
-    statusLabel.TextXAlignment = Enum.TextXAlignment.Left
-    statusLabel.ZIndex = 1002
-    statusLabel.Parent = card
-
-    -- Progress bar
-    local prog = Instance.new("Frame")
-    prog.Size = UDim2.new(0.5, 0, 0, 3)
-    prog.Position = UDim2.new(0, 20, 0, 120)
-    prog.BackgroundColor3 = M3.CurrentTheme.SurfaceContainerHighest
-    prog.ZIndex = 1002
-    prog.Parent = card
-    local progCorner = Instance.new("UICorner")
-    progCorner.CornerRadius = UDim.new(1, 0)
-    progCorner.Parent = prog
-
-    local progFill = Instance.new("Frame")
-    progFill.Size = UDim2.new(0, 0, 1, 0)
-    progFill.BackgroundColor3 = M3.CurrentTheme.Primary
-    progFill.BorderSizePixel = 0
-    progFill.ZIndex = 1003
-    progFill.Parent = prog
-    local progFillCorner = Instance.new("UICorner")
-    progFillCorner.CornerRadius = UDim.new(1, 0)
-    progFillCorner.Parent = progFill
-
-    local pctLabel = Instance.new("TextLabel")
-    pctLabel.Text = "0%"
-    pctLabel.Font = M3.CurrentTheme.FontBold
-    pctLabel.TextSize = 13
-    pctLabel.TextColor3 = M3.CurrentTheme.Primary
-    pctLabel.Position = UDim2.new(1, -56, 0, 112)
-    pctLabel.Size = UDim2.new(0, 40, 0, 18)
-    pctLabel.BackgroundTransparency = 1
-    pctLabel.TextXAlignment = Enum.TextXAlignment.Right
-    pctLabel.ZIndex = 1002
-    pctLabel.Parent = card
-
-    -- Entrance tween on the card
-    M3:AnimateWindowResize(card, UDim2.new(0, 320, 0, 200), 0.35)
-
-    local api = {
-        Root = root,
-        SetProgress = function(n, text)
-            n = tonumber(n) or 0
-            if n < 0 then n = 0 end
-            if n > 1 then n = 1 end
-            if progFill then
-                M3:Tween(progFill, 0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.Out, {
-                    Size = UDim2.new(n, 0, 1, 0)
-                })
-            end
-            if pctLabel then pctLabel.Text = tostring(math.floor(n * 100)) .. "%" end
-            if text and statusLabel then statusLabel.Text = text end
-        end,
-        SetStatus = function(text)
-            if statusLabel then statusLabel.Text = text end
-        end,
-        Destroy = function()
-            M3:HideLoading()
-        end
-    }
-
-    M3.Loading = api
-    return api
-end
-
-function M3:HideLoading()
-    local api = M3.Loading
-    M3.Loading = nil
-    if api and api.Root then
-        pcall(function() api.Root:Destroy() end)
-    end
-end
-
--- ============================================================
--- MD3 modal dialog
--- ============================================================
 M3.Dialogs = {}
 
 function M3:ShowDialog(options)
@@ -747,7 +616,7 @@ function M3:ShowDialog(options)
     local dim = Instance.new("TextButton")
     dim.Size = UDim2.new(1, 0, 1, 0)
     dim.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-    dim.BackgroundTransparency = 0.4
+    dim.BackgroundTransparency = 1
     dim.Text = ""
     dim.BorderSizePixel = 0
     dim.ZIndex = 999
@@ -795,7 +664,7 @@ function M3:ShowDialog(options)
     content.ZIndex = 1001
     content.Parent = card
 
-    -- buttons
+    
     local btnContainer = Instance.new("Frame")
     btnContainer.Size = UDim2.new(1, -20, 0, 34)
     btnContainer.Position = UDim2.new(0, 10, 1, -44)
@@ -861,8 +730,8 @@ function M3:ShowDialog(options)
     }
 end
 
--- Ensure single instance: if a marker with 'scriptName' is already running, show a dialog
--- asking what to do. 'callback' is invoked with true when the caller may proceed.
+
+
 M3.RegisteredMarkers = M3.RegisteredMarkers or {}
 
 function M3.EnsureSingleInstance(scriptName, callback)
@@ -877,35 +746,35 @@ function M3.EnsureSingleInstance(scriptName, callback)
 
     local existing = _G[markerName]
     if not existing then
-        -- No instance running: register and proceed
+        
         local h = register()
         if callback then callback(true) end
         return h
     end
 
-    -- Another instance detected: ask the user
+    
     M3:ShowDialog({
-        Title = scriptName .. " уже запущен",
-        Content = "Скрипт уже работает. Что сделать?",
+        Title = scriptName .. " СѓР¶Рµ Р·Р°РїСѓС‰РµРЅ",
+        Content = "РЎРєСЂРёРїС‚ СѓР¶Рµ СЂР°Р±РѕС‚Р°РµС‚. Р§С‚Рѕ СЃРґРµР»Р°С‚СЊ?",
         Buttons = {
-            { Text = "Отмена", Primary = false },
-            { Text = "Запустить отдельно", Primary = false },
-            { Text = "Удалить старый и запустить", Primary = true },
+            { Text = "РћС‚РјРµРЅР°", Primary = false },
+            { Text = "Р—Р°РїСѓСЃС‚РёС‚СЊ РѕС‚РґРµР»СЊРЅРѕ", Primary = false },
+            { Text = "РЈРґР°Р»РёС‚СЊ СЃС‚Р°СЂС‹Р№ Рё Р·Р°РїСѓСЃС‚РёС‚СЊ", Primary = true },
         },
         Callback = function(idx)
             if idx == 2 then
-                -- Run separately: allow a second instance
+                
                 register()
                 if callback then callback(true) end
             elseif idx == 3 then
-                -- Kill old instance then proceed
+                
                 if existing.Cleanup and type(existing.Cleanup) == "function" then
                     pcall(existing.Cleanup)
                 end
                 register()
                 if callback then callback(true) end
             else
-                -- Cancel
+                
                 if callback then callback(false) end
             end
         end
@@ -913,7 +782,7 @@ function M3.EnsureSingleInstance(scriptName, callback)
     return existing
 end
 
--- Notification holder: bottom-right, stacked manually (dynamic-island style).
+
 local NotificationHolder = Instance.new("Frame")
 NotificationHolder.Name = "M3_NotificationHolder"
 NotificationHolder.Size = UDim2.new(0, 320, 1, 0)
@@ -925,7 +794,7 @@ NotificationHolder.Parent = ScreenGui
 
 M3.ActiveNotifs = {}
 
--- Notification sound (rbxassetid): created once, reused for every Notify.
+
 local NotifySound
 M3.NotifySoundId = "rbxassetid://139746569667955"
 M3.NotifySoundVolume = 0.5
@@ -1026,14 +895,14 @@ function M3:Notify(options)
     body.TextXAlignment = Enum.TextXAlignment.Left
     body.Parent = card
 
-    -- Measure body height accurately with TextService (2 lines max before growing the card)
+    
     local bodyH = 0
     if contentText ~= "" then
         local availW = CARD_W - contentOffset - 14
-        local sz = pcall(function()
+        local ok, sz = pcall(function()
             return TextService:GetTextSize(contentText, 13, M3.CurrentTheme.Font, Vector2.new(availW, 512))
         end)
-        if sz then
+        if ok and sz then
             bodyH = math.max(18, math.min(48, sz.Y))
         else
             bodyH = 18
@@ -1041,7 +910,7 @@ function M3:Notify(options)
     end
     body.Size = UDim2.new(1, -contentOffset - 14, 0, bodyH)
 
-    -- Buttons area (optional)
+    
     local btnAreaH = 0
     if #buttons > 0 then
         btnAreaH = 32
@@ -1098,7 +967,7 @@ function M3:Notify(options)
         end
     end
 
-    -- Manual bottom-up stacking (newest at the bottom)
+    
     local n = {
         Card = card,
         Height = cardH,
@@ -1107,7 +976,7 @@ function M3:Notify(options)
     }
     table.insert(M3.ActiveNotifs, n)
 
-    -- Enforce a stack limit of 5: retire the oldest (top) notification on overflow
+    
     while #M3.ActiveNotifs > 5 do
         local oldest = M3.ActiveNotifs[1]
         if oldest then
@@ -1117,7 +986,7 @@ function M3:Notify(options)
         end
     end
 
-    -- Entry: start off-screen (bottom-right), fly in to its slot
+    
     card.AnchorPoint = Vector2.new(0, 1)
     card.Position = UDim2.new(1, 60, 0, n.SlotY - 6)
 
@@ -1125,7 +994,7 @@ function M3:Notify(options)
         Position = UDim2.new(0, 0, 0, n.SlotY)
     })
 
-    -- Timer / progress bar
+    
     local total = autoHide and (displayMs / 1000) or 0
     local remaining = total
     local paused = false
@@ -1148,7 +1017,7 @@ function M3:Notify(options)
         M3:TrackConnection(heartbeat)
     end
 
-    -- Hover -> pause
+    
     card.MouseEnter:Connect(function()
         paused = true
     end)
@@ -1156,7 +1025,7 @@ function M3:Notify(options)
         if not dragging then paused = false end
     end)
 
-    -- Drag / swipe
+    
     local dragging = false
     local dragStartMouse
     local dragStartPos
@@ -1176,7 +1045,7 @@ function M3:Notify(options)
             if mp then
                 local dx = mp.X - dragStartMouse.X
                 local dy = mp.Y - dragStartMouse.Y
-                -- card is bottom-anchored: moving down on screen reduces Y offset
+                
                 card.Position = UDim2.new(0, math.max(0, dragStartPos.X.Offset + dx), 0, dragStartPos.Y.Offset - dy)
             end
         end
@@ -1194,7 +1063,7 @@ function M3:Notify(options)
             elseif dyDown > 90 then
                 M3.HideNotif(n, "down")
             else
-                -- spring back to rest
+                
                 M3:Tween(card, 0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out, {
                     Position = UDim2.new(0, 0, 0, n.SlotY)
                 })
@@ -1208,12 +1077,12 @@ function M3:Notify(options)
     end
 end
 
--- Remove a notification from the stack (with optional exit direction: "timeout", "right", "down").
+
 function M3:HideNotif(n, direction)
     if not n or n.Closing then return end
     n.Closing = true
     if n.Card and n.Card.Parent then
-        -- remove from stack + reflow others
+        
         local idx
         for i, e in ipairs(M3.ActiveNotifs) do
             if e == n then idx = i end
@@ -1233,7 +1102,7 @@ function M3:HideNotif(n, direction)
                 BackgroundTransparency = 1
             })
         else
-            -- timeout / default: fold back toward bottom-right corner
+            
             M3:Tween(card, 0.4, Enum.EasingStyle.Quart, Enum.EasingDirection.In, {
                 Position = UDim2.new(1, 60, 0, card.Position.Y.Offset),
                 BackgroundTransparency = 1
@@ -1245,7 +1114,7 @@ function M3:HideNotif(n, direction)
     end
 end
 
--- Reposition all active notifications to their correct stacked slots.
+
 function M3:ReflowNotifs()
     local y = 0
     for i = #M3.ActiveNotifs, 1, -1 do
@@ -1611,12 +1480,12 @@ function M3:CreateWindow(config)
         windowVisible = visible
 
         if visible then
-            -- Capture the real target size before we shrink it
+            
             local targetSize = mainFrame.AbsoluteSize
             if targetSize.X <= 0 then targetSize = mainFrame.Size end
             mainFrame.Visible = true
 
-            -- Quick shrink to a fraction, then expand to full size (unfold effect)
+            
             local absPos = mainFrame.AbsolutePosition
             local cx = absPos.X + targetSize.X / 2
             local cy = absPos.Y + targetSize.Y / 2
@@ -1685,7 +1554,7 @@ function M3:CreateWindow(config)
         tabBtnText.ZIndex = 5
         tabBtnText.Parent = tabBtn
 
-        -- Resolve optional icon (name / asset id / url) and show it left of the text
+        
         local tabIconImage = M3:LoadIcon(iconId)
         local tabIcon
         if tabIconImage ~= "" then
@@ -2000,9 +1869,9 @@ function M3:CreateWindow(config)
                 end)
             end
 
-            -- MD3 Switch (переключатель): трек + ползунок, с иконками внутри (✓/✕) или без.
-            -- Group:AddSwitch(text, { Default=false, WithIcon=true, Enabled=true, Callback=fn })
-            --   или Group:AddSwitch(text, defaultState, callback)
+            
+            
+            
             function GroupAPI:AddSwitch(text, opts, legacyCallback)
                 local cfg = {}
                 if type(opts) == "table" then
@@ -2043,7 +1912,7 @@ function M3:CreateWindow(config)
                 label.ZIndex = 6
                 label.Parent = switchFrame
 
-                -- Трек (слева отступ, высота 28px как в MD3)
+                
                 local switchTrack = Instance.new("Frame")
                 switchTrack.Size = UDim2.new(0, 56, 0, 28)
                 switchTrack.Position = UDim2.new(1, -68, 0.5, -14)
@@ -2055,7 +1924,7 @@ function M3:CreateWindow(config)
                 trackCorner.CornerRadius = UDim.new(1, 0)
                 trackCorner.Parent = switchTrack
 
-                -- Ползунок (круглый, растёт при включении и при нажатии)
+                
                 local switchKnob = Instance.new("Frame")
                 switchKnob.Size = UDim2.new(0, state and 24 or 16, 0, state and 24 or 16)
                 switchKnob.Position = state and UDim2.new(1, -28, 0.5, -12) or UDim2.new(0, 2, 0.5, -8)
@@ -2123,20 +1992,20 @@ function M3:CreateWindow(config)
                 switchFrame.MouseButton1Down:Connect(function()
                     if not enabled then return end
                     if floated then floated = false return end
-                    -- сжатие ползунка при нажатии
+                    
                     SetState(state, true)
                 end)
 
                 switchFrame.MouseButton1Up:Connect(function()
                     if not enabled then return end
                     local newState = not state
-                    -- отпускаем — ползунок возвращается к нормальному размеру и переключается
+                    
                     SetState(newState, false)
                 end)
 
                 applyColors()
 
-                -- Программное управление
+                
                 return {
                     GetState = function() return state end,
                     SetState = function(v)
@@ -2150,10 +2019,10 @@ function M3:CreateWindow(config)
             end
 
             function GroupAPI:AddSlider(text, minVal, maxVal, defaultVal, opts, legacyCallback)
-                -- Flexible API: positional text,min,max,value OR a single options table
+                
                 local cfg = {}
                 if type(minVal) == "table" then
-                    -- AddSlider(text, {Min=,Max=,Value=,Style=,Step=,Precise=,Callback=})
+                    
                     cfg = minVal
                     text = text
                 else
@@ -2187,10 +2056,10 @@ function M3:CreateWindow(config)
                 local isRange = style == "range"
                 local isCentered = style == "centered"
 
-                -- Centered: mid is zero; supports negative/positive symmetric min/max
+                
                 local centerVal = (min + max) / 2
 
-                -- Values (single) or [low, high] (range)
+                
                 local snap = (style == "discrete" or isRange)
                 local function roundVal(v)
                     v = math.clamp(v, min, max)
@@ -2258,7 +2127,7 @@ function M3:CreateWindow(config)
                 valLabel.Parent = sliderFrame
                 if not showValue then valLabel.Visible = false end
 
-                -- Track container (clickable)
+                
                 local track = Instance.new("TextButton")
                 track.Name = "Track"
                 track.Size = UDim2.new(1, -24, 0, 20)
@@ -2269,7 +2138,7 @@ function M3:CreateWindow(config)
                 track.ZIndex = 6
                 track.Parent = sliderFrame
 
-                -- Inactive track line (full width)
+                
                 local trackLine = Instance.new("Frame")
                 trackLine.Size = UDim2.new(1, 0, 0, 4)
                 trackLine.Position = UDim2.new(0, 0, 0.5, -2)
@@ -2282,7 +2151,7 @@ function M3:CreateWindow(config)
                 trackLineCorner.CornerRadius = UDim.new(1, 0)
                 trackLineCorner.Parent = trackLine
 
-                -- Active fill (dimension differs per style)
+                
                 local fill = Instance.new("Frame")
                 fill.BackgroundColor3 = M3.CurrentTheme.Primary
                 fill.BorderSizePixel = 0
@@ -2301,7 +2170,7 @@ function M3:CreateWindow(config)
                     fill.Size = UDim2.new(0, 0, 0, 4)
                 end
 
-                -- Thumb handle(s)
+                
                 local function makeThumb()
                     local thumb = Instance.new("Frame")
                     thumb.Size = UDim2.new(0, 16, 0, 16)
@@ -2332,7 +2201,7 @@ function M3:CreateWindow(config)
                     thumbSingle = makeThumb()
                 end
 
-                -- Discrete tick marks
+                
                 local tickContainer
                 if style == "discrete" then
                     tickContainer = Instance.new("Frame")
@@ -2357,7 +2226,7 @@ function M3:CreateWindow(config)
                     end
                 end
 
-                -- Discrete value popup label
+                
                 local popup
                 if style == "discrete" then
                     popup = Instance.new("Frame")
@@ -2382,7 +2251,7 @@ function M3:CreateWindow(config)
                     plabel.Parent = popup
                 end
 
-                -- Mapping value <-> pixel X (linear in all styles; centered only changes fill origin)
+                
                 local trackW = track.AbsoluteSize.X
                 local function valueToPct(v)
                     return (v - min) / (max - min)
@@ -2433,7 +2302,7 @@ function M3:CreateWindow(config)
                         plabel.Text = tostring(val)
                     end
 
-                    -- Update value labels
+                    
                     if isRange then
                         valLabel.Text = tostring(val[1]) .. " - " .. tostring(val[2])
                     else
@@ -2475,7 +2344,7 @@ function M3:CreateWindow(config)
                     if isRange then
                         local idx = dragIdx
                         if idx == nil then
-                            -- choose nearest thumb
+                            
                             local p = valueToPct(v)
                             local p1 = valueToPct(val[1])
                             local p2 = valueToPct(val[2])
@@ -2483,7 +2352,7 @@ function M3:CreateWindow(config)
                             dragIdx = idx
                         end
                         apply(v, idx)
-                        -- keep low <= high
+                        
                         if val[1] > val[2] then
                             val[1], val[2] = val[2], val[1]
                             paint()
@@ -2523,7 +2392,7 @@ function M3:CreateWindow(config)
 
                 paint()
 
-                -- Return a handle to read/set values programmatically
+                
                 return {
                     GetValue = function()
                         if isRange then return val[1], val[2] end
@@ -2752,7 +2621,7 @@ function M3:CreateWindow(config)
         return TabAPI
     end
 
-    -- Entrance animation: the freshly created window unfolds from the center
+    
     if config.AnimateIn ~= false then
         delay(0.1, function()
             if mainFrame and mainFrame.Parent then
@@ -2888,12 +2757,12 @@ local hideKeyConn = UserInputService.InputBegan:Connect(function(input, gameProc
 end)
 M3:TrackConnection(hideKeyConn)
 
--- Alias: Cleanup all resources (connections, threads, instances, springs, UI)
+
 function M3:Destroy()
     M3:Cleanup()
 end
 
--- Auto-cleanup if the top-level ScreenGui is destroyed externally
+
 local cleanupDone = false
 local ancestryConn = ScreenGui.AncestryChanged:Connect(function(_, parent)
     if parent == nil and not cleanupDone then
@@ -2902,7 +2771,7 @@ local ancestryConn = ScreenGui.AncestryChanged:Connect(function(_, parent)
 end)
 M3:TrackConnection(ancestryConn)
 
--- Prevents double-cleanup when M3:Cleanup destroys the ScreenGui
+
 function M3:Cleanup()
     if cleanupDone then return end
     cleanupDone = true
@@ -2937,7 +2806,7 @@ function M3:Cleanup()
     M3.ActiveNotifs = {}
     M3.IsHidden = false
 
-    -- Clear single-instance markers registered through M3.EnsureSingleInstance
+    
     for _, m in ipairs(M3.RegisteredMarkers or {}) do
         _G[m] = nil
     end
