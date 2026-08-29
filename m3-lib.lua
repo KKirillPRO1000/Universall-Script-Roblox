@@ -920,11 +920,14 @@ function M3:Notify(options)
     card.Size = UDim2.new(0, CARD_W, 0, cardH)
 
     local timerBar = Instance.new("Frame")
-    timerBar.Size = UDim2.new(1, 0, 0, BAR_H)
-    timerBar.Position = UDim2.new(0, 0, 1, -BAR_H)
+    timerBar.Size = UDim2.new(1, -24, 0, BAR_H)
+    timerBar.Position = UDim2.new(0, 12, 1, -(BAR_H + 6))
     timerBar.BackgroundColor3 = M3.CurrentTheme.Primary
     timerBar.BorderSizePixel = 0
     timerBar.Parent = card
+    local timerBarCorner = Instance.new("UICorner")
+    timerBarCorner.CornerRadius = UDim.new(0, BAR_H / 2)
+    timerBarCorner.Parent = timerBar
     if not autoHide then
         timerBar.BackgroundTransparency = 1
     end
@@ -974,22 +977,11 @@ function M3:Notify(options)
         SlotY = 0,
         Closing = false,
     }
-    table.insert(M3.ActiveNotifs, n)
+table.insert(M3.ActiveNotifs, n)
 
-    
-    while #M3.ActiveNotifs > 5 do
-        local oldest = M3.ActiveNotifs[1]
-        if oldest then
-            M3.HideNotif(oldest, "right")
-        else
-            break
-        end
-    end
-
-    
     card.AnchorPoint = Vector2.new(0, 1)
-    card.Position = UDim2.new(1, 60, 0, n.SlotY - 6)
-
+    M3.ReflowNotifs()
+    card.Position = UDim2.new(0, 0, 0, n.SlotY + 70)
     M3:Tween(card, 0.45, Enum.EasingStyle.Back, Enum.EasingDirection.Out, {
         Position = UDim2.new(0, 0, 0, n.SlotY)
     })
@@ -998,7 +990,7 @@ function M3:Notify(options)
     local total = autoHide and (displayMs / 1000) or 0
     local remaining = total
     local paused = false
-    timerBar.Size = UDim2.new(1, 0, 0, BAR_H)
+    timerBar.Size = UDim2.new(1, -24, 0, BAR_H)
 
     local heartbeat
     if autoHide then
@@ -1008,7 +1000,7 @@ function M3:Notify(options)
             if remaining > 0 then
                 remaining = remaining - dt
                 if remaining < 0 then remaining = 0 end
-                timerBar.Size = UDim2.new(remaining / total, 0, 0, BAR_H)
+                timerBar.Size = UDim2.new(remaining / total, -24, 0, BAR_H)
                 if remaining <= 0 then
                     M3.HideNotif(n, "timeout")
                 end
@@ -1030,40 +1022,38 @@ function M3:Notify(options)
     local dragStartMouse
     local dragStartPos
 
-    card.InputBegan:Connect(function(input)
+card.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             dragging = true
             paused = true
-            dragStartMouse = input.Position
+            dragStartMouse = UserInputService:GetMouseLocation()
             dragStartPos = card.Position
         end
     end)
 
     local dragMoved = UserInputService.InputChanged:Connect(function(input)
         if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-            local mp = input.Position or UserInputService:GetMouseLocation()
+            local mp = UserInputService:GetMouseLocation()
             if mp then
                 local dx = mp.X - dragStartMouse.X
                 local dy = mp.Y - dragStartMouse.Y
-                
-                card.Position = UDim2.new(0, math.max(0, dragStartPos.X.Offset + dx), 0, dragStartPos.Y.Offset - dy)
+                card.Position = UDim2.new(0, math.max(0, dragStartPos.X.Offset + dx), 0, dragStartPos.Y.Offset + dy)
             end
         end
     end)
     M3:TrackConnection(dragMoved)
 
-    local dragEnded = UserInputService.InputEnded:Connect(function(input)
+local dragEnded = UserInputService.InputEnded:Connect(function(input)
         if dragging and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
             dragging = false
             local dxX = card.Position.X.Offset
-            local dyDown = n.SlotY - card.Position.Y.Offset
+            local dyDown = card.Position.Y.Offset - n.SlotY
             paused = false
             if dxX > 120 then
                 M3.HideNotif(n, "right")
             elseif dyDown > 90 then
                 M3.HideNotif(n, "down")
             else
-                
                 M3:Tween(card, 0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out, {
                     Position = UDim2.new(0, 0, 0, n.SlotY)
                 })
@@ -1098,7 +1088,7 @@ function M3:HideNotif(n, direction)
             })
         elseif direction == "down" then
             M3:Tween(card, 0.35, Enum.EasingStyle.Quart, Enum.EasingDirection.In, {
-                Position = UDim2.new(0, card.Position.X.Offset, 0, -(NotificationHolder.AbsoluteSize.Y or 300) - 60),
+                Position = UDim2.new(0, card.Position.X.Offset, 0, n.SlotY + 240),
                 BackgroundTransparency = 1
             })
         else
@@ -1116,17 +1106,18 @@ end
 
 
 function M3:ReflowNotifs()
-    local y = 0
+    local holderH = NotificationHolder.AbsoluteSize.Y
+    if holderH < 100 or holderH ~= holderH then holderH = 480 end
+    local y = holderH - 6
     for i = #M3.ActiveNotifs, 1, -1 do
         local cardN = M3.ActiveNotifs[i]
-        local targetY = y
-        cardN.SlotY = targetY
+        cardN.SlotY = y
         if cardN.Card and cardN.Card.Parent and not cardN.Closing then
-            M3:Tween(cardN.Card, 0.35, Enum.EasingStyle.Quart, Enum.EasingDirection.Out, {
-                Position = UDim2.new(0, 0, 0, targetY)
+            M3:Tween(cardN.Card, 0.4, Enum.EasingStyle.Quart, Enum.EasingDirection.Out, {
+                Position = UDim2.new(0, 0, 0, y)
             })
         end
-        y = y + cardN.Height + 8
+        y = y - (cardN.Height + 8)
     end
 end
 
