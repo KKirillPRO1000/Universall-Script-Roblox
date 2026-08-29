@@ -242,6 +242,69 @@ function M3:Tween(instance, time, style, direction, props)
     return tween
 end
 
+-- Resize a window while keeping its center fixed (works with default AnchorPoint 0,0).
+-- Returns the target pixel size. Plays a single tween on Size+Position so the window
+-- visually "unfolds" from / folds toward its center (nice for show/hide).
+function M3:AnimateWindowResize(frame, toSize, time, style, direction)
+    time = time or 0.35
+    style = style or Enum.EasingStyle.Quart
+    direction = direction or Enum.EasingDirection.Out
+    if not frame or not frame.Parent then return end
+
+    local parent = frame.Parent
+    local pw, ph = 1280, 720
+    if parent then
+        local psz = parent.AbsoluteSize
+        if psz then pw, ph = psz.X, psz.Y end
+    end
+
+    local tx = toSize.X.Scale * pw + toSize.X.Offset
+    local ty = toSize.Y.Scale * ph + toSize.Y.Offset
+
+    local fx, fy = frame.AbsoluteSize.X, frame.AbsoluteSize.Y
+    if fx <= 0 or fy <= 0 then
+        fx, fy = tx, ty
+    end
+
+    local absPos = frame.AbsolutePosition
+    local cx = absPos.X + fx / 2
+    local cy = absPos.Y + fy / 2
+
+    local newLeft = cx - tx / 2
+    local newTop = cy - ty / 2
+
+    M3:Tween(frame, time, style, direction, {
+        Position = UDim2.new(0, newLeft, 0, newTop),
+        Size = UDim2.new(0, tx, 0, ty)
+    })
+
+    return UDim2.new(0, tx, 0, ty)
+end
+
+-- Soft entrance: shrink the window to a fraction, then expand to the real size.
+function M3:WindowEntrance(frame, realSize, time)
+    local parent = frame.Parent
+    local pw, ph = 1280, 720
+    if parent then
+        local psz = parent.AbsoluteSize
+        if psz then pw, ph = psz.X, psz.Y end
+    end
+    local rx = realSize.X.Scale * pw + realSize.X.Offset
+    local ry = realSize.Y.Scale * ph + realSize.Y.Offset
+
+    local absPos = frame.AbsolutePosition
+    local cx = absPos.X + rx / 2
+    local cy = absPos.Y + ry / 2
+    local k = 0.6
+    local sx, sy = rx * k, ry * k
+
+    frame.Size = UDim2.new(0, sx, 0, sy)
+    frame.Position = UDim2.new(0, cx - sx / 2, 0, cy - sy / 2)
+    frame.Visible = true
+
+    M3:AnimateWindowResize(frame, realSize, time or 0.5, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
+end
+
 function M3:Ripple(button, x, y)
     local ripple = Instance.new("Frame")
     ripple.Name = "M3_Ripple"
@@ -298,10 +361,59 @@ function M3:PressMorph(targetCorner, idleRadius, triggerButton)
     M3:TrackConnection(e)
 end
 
+-- Recolor every existing themed element under the main ScreenGui.
+-- Works by matching each element's current color/radius against the OLD theme
+-- and replacing it with the matching value from the NEW (current) theme.
+-- No per-component tagging needed.
+function M3:RecolorAll(oldTheme)
+    if not ScreenGui then return end
+    oldTheme = oldTheme or {}
+    local newTheme = M3.CurrentTheme
+
+    local colorMap = {}
+    local radiusMap = {}
+    for role, oldVal in pairs(oldTheme) do
+        local newVal = newTheme[role]
+        if type(oldVal) == "Color3" and type(newVal) == "Color3" then
+            colorMap[oldVal] = newVal
+        elseif type(oldVal) == "UDim" and type(newVal) == "UDim" then
+            radiusMap[oldVal] = newVal
+        end
+    end
+    if next(colorMap) == nil and next(radiusMap) == nil then return end
+
+    local stack = { ScreenGui }
+    while #stack > 0 do
+        local obj = table.remove(stack)
+        if obj:IsA("GuiObject") then
+            if colorMap[obj.BackgroundColor3] then
+                obj.BackgroundColor3 = colorMap[obj.BackgroundColor3]
+            end
+            if colorMap[obj.TextColor3] then
+                obj.TextColor3 = colorMap[obj.TextColor3]
+            end
+            if colorMap[obj.ImageColor3] then
+                obj.ImageColor3 = colorMap[obj.ImageColor3]
+            end
+        end
+        for _, child in ipairs(obj:GetChildren()) do
+            if child:IsA("UIStroke") and colorMap[child.Color] then
+                child.Color = colorMap[child.Color]
+            end
+            if child:IsA("UICorner") and radiusMap[child.CornerRadius] then
+                child.CornerRadius = radiusMap[child.CornerRadius]
+            end
+            table.insert(stack, child)
+        end
+    end
+end
+
 function M3:SetTheme(themeName)
     if M3.Themes[themeName] then
+        local prev = M3.CurrentTheme
         M3.CurrentThemeName = themeName
         M3.CurrentTheme = M3.Themes[themeName]
+        M3:RecolorAll(prev)
         MobileExpandButton.BackgroundColor3 = M3.CurrentTheme.PrimaryContainer
         MobileExpandButton.TextColor3 = M3.CurrentTheme.OnPrimaryContainer
     end
@@ -457,6 +569,371 @@ function M3:LoadIcon(iconId)
     return ""
 end
 
+-- ============================================================
+-- Loading screen (MD3): full-screen overlay with spinner + progress bar
+-- ============================================================
+M3.Loading = nil
+
+function M3:ShowLoading(title)
+    title = title or "M3"
+    if M3.Loading and M3.Loading.Root and M3.Loading.Root.Parent then
+        return M3.Loading
+    end
+
+    local root = Instance.new("Frame")
+    root.Name = "M3_Loading"
+    root.Size = UDim2.new(1, 0, 1, 0)
+    root.BackgroundColor3 = M3.CurrentTheme.Surface
+    root.ZIndex = 1000
+    root.Parent = ScreenGui
+
+    local dim = Instance.new("Frame")
+    dim.Size = UDim2.new(1, 0, 1, 0)
+    dim.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    dim.BackgroundTransparency = 0.4
+    dim.ZIndex = 1000
+    dim.Parent = root
+
+    -- Centered card
+    local card = Instance.new("Frame")
+    card.Size = UDim2.new(0, 320, 0, 200)
+    card.Position = UDim2.new(0.5, -160, 0.5, -100)
+    card.BackgroundColor3 = M3.CurrentTheme.SurfaceContainerHigh
+    card.ZIndex = 1001
+    card.Parent = root
+
+    local cardCorner = Instance.new("UICorner")
+    cardCorner.CornerRadius = M3.CurrentTheme.CornerLarge
+    cardCorner.Parent = card
+
+    local cardStroke = Instance.new("UIStroke")
+    cardStroke.Color = M3.CurrentTheme.OutlineVariant
+    cardStroke.Thickness = 1
+    cardStroke.Parent = card
+
+    -- Title
+    local titleLabel = Instance.new("TextLabel")
+    titleLabel.Text = title
+    titleLabel.Font = M3.CurrentTheme.FontBold
+    titleLabel.TextSize = 18
+    titleLabel.TextColor3 = M3.CurrentTheme.OnSurface
+    titleLabel.Position = UDim2.new(0, 20, 0, 18)
+    titleLabel.Size = UDim2.new(1, -40, 0, 26)
+    titleLabel.BackgroundTransparency = 1
+    titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+    titleLabel.ZIndex = 1002
+    titleLabel.Parent = card
+
+    -- Subtitle / status
+    local statusLabel = Instance.new("TextLabel")
+    statusLabel.Text = "Loading..."
+    statusLabel.Font = M3.CurrentTheme.Font
+    statusLabel.TextSize = 13
+    statusLabel.TextColor3 = M3.CurrentTheme.OnSurfaceVariant
+    statusLabel.Position = UDim2.new(0, 20, 0, 48)
+    statusLabel.Size = UDim2.new(1, -40, 0, 20)
+    statusLabel.BackgroundTransparency = 1
+    statusLabel.TextXAlignment = Enum.TextXAlignment.Left
+    statusLabel.ZIndex = 1002
+    statusLabel.Parent = card
+
+    -- Spinner ring (donut outline + orbiting dot)
+    local ring = Instance.new("Frame")
+    ring.Size = UDim2.new(0, 48, 0, 48)
+    ring.Position = UDim2.new(0.5, -24, 1, -96)
+    ring.BackgroundTransparency = 1
+    ring.ZIndex = 1002
+    ring.Parent = card
+
+    local ringStroke = Instance.new("UIStroke")
+    ringStroke.Color = M3.CurrentTheme.SurfaceContainerHighest
+    ringStroke.Thickness = 4
+    ringStroke.Parent = ring
+
+    local ringCorner = Instance.new("UICorner")
+    ringCorner.CornerRadius = UDim.new(1, 0)
+    ringCorner.Parent = ring
+
+    local dot = Instance.new("Frame")
+    dot.Size = UDim2.new(0, 10, 0, 10)
+    dot.Position = UDim2.new(0.5, -5, 0, -5)
+    dot.BackgroundColor3 = M3.CurrentTheme.Primary
+    dot.ZIndex = 1003
+    dot.Parent = ring
+    local dotCorner = Instance.new("UICorner")
+    dotCorner.CornerRadius = UDim.new(1, 0)
+    dotCorner.Parent = dot
+
+    -- add rotation loop
+    local spinConn = RunService.RenderStepped:Connect(function(dt)
+        if not ring or not ring.Parent then return end
+        ring.Rotation = (ring.Rotation + dt * 320) % 360
+    end)
+    M3:TrackConnection(spinConn)
+
+    -- Progress bar
+    local prog = Instance.new("Frame")
+    prog.Size = UDim2.new(0.5, 0, 0, 3)
+    prog.Position = UDim2.new(0, 20, 0, 120)
+    prog.BackgroundColor3 = M3.CurrentTheme.SurfaceContainerHighest
+    prog.ZIndex = 1002
+    prog.Parent = card
+    local progCorner = Instance.new("UICorner")
+    progCorner.CornerRadius = UDim.new(1, 0)
+    progCorner.Parent = prog
+
+    local progFill = Instance.new("Frame")
+    progFill.Size = UDim2.new(0, 0, 1, 0)
+    progFill.BackgroundColor3 = M3.CurrentTheme.Primary
+    progFill.BorderSizePixel = 0
+    progFill.ZIndex = 1003
+    progFill.Parent = prog
+    local progFillCorner = Instance.new("UICorner")
+    progFillCorner.CornerRadius = UDim.new(1, 0)
+    progFillCorner.Parent = progFill
+
+    local pctLabel = Instance.new("TextLabel")
+    pctLabel.Text = "0%"
+    pctLabel.Font = M3.CurrentTheme.FontBold
+    pctLabel.TextSize = 13
+    pctLabel.TextColor3 = M3.CurrentTheme.Primary
+    pctLabel.Position = UDim2.new(1, -56, 0, 112)
+    pctLabel.Size = UDim2.new(0, 40, 0, 18)
+    pctLabel.BackgroundTransparency = 1
+    pctLabel.TextXAlignment = Enum.TextXAlignment.Right
+    pctLabel.ZIndex = 1002
+    pctLabel.Parent = card
+
+    -- Entrance tween on the card
+    M3:AnimateWindowResize(card, UDim2.new(0, 320, 0, 200), 0.35)
+
+    local api = {
+        Root = root,
+        SetProgress = function(n, text)
+            n = math.clamp(n, 0, 1)
+            if progFill then
+                M3:Tween(progFill, 0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.Out, {
+                    Size = UDim2.new(n, 0, 1, 0)
+                })
+            end
+            if pctLabel then pctLabel.Text = tostring(math.floor(n * 100)) .. "%" end
+            if text and statusLabel then statusLabel.Text = text end
+        end,
+        SetStatus = function(text)
+            if statusLabel then statusLabel.Text = text end
+        end,
+        Destroy = function()
+            M3:HideLoading()
+        end
+    }
+
+    M3.Loading = api
+    return api
+end
+
+function M3:HideLoading()
+    local api = M3.Loading
+    M3.Loading = nil
+    if api and api.Root and api.Root.Parent then
+        pcall(function()
+            M3:Tween(api.Root, 0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.In, {
+                BackgroundTransparency = 1
+            })
+        end)
+        task.delay(0.31, function()
+            if api.Root and api.Root.Parent then api.Root:Destroy() end
+        end)
+    end
+end
+
+-- ============================================================
+-- MD3 modal dialog
+-- ============================================================
+M3.Dialogs = {}
+
+function M3:ShowDialog(options)
+    options = options or {}
+    local titleText = options.Title or "Dialog"
+    local contentText = options.Content or ""
+    local buttons = options.Buttons or { "OK" }
+    local callback = options.Callback
+
+    local root = Instance.new("Frame")
+    root.Name = "M3_Dialog"
+    root.Size = UDim2.new(1, 0, 1, 0)
+    root.BackgroundTransparency = 1
+    root.ZIndex = 999
+    root.Parent = ScreenGui
+
+    local dim = Instance.new("TextButton")
+    dim.Size = UDim2.new(1, 0, 1, 0)
+    dim.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    dim.BackgroundTransparency = 0.4
+    dim.Text = ""
+    dim.BorderSizePixel = 0
+    dim.ZIndex = 999
+    dim.Parent = root
+
+    local card = Instance.new("Frame")
+    card.Size = UDim2.new(0, 320, 0, 120)
+    card.Position = UDim2.new(0.5, -160, 0.5, -60)
+    card.BackgroundColor3 = M3.CurrentTheme.SurfaceContainerHigh
+    card.ZIndex = 1000
+    card.Parent = root
+
+    local cardCorner = Instance.new("UICorner")
+    cardCorner.CornerRadius = M3.CurrentTheme.CornerLarge
+    cardCorner.Parent = card
+
+    local cardStroke = Instance.new("UIStroke")
+    cardStroke.Color = M3.CurrentTheme.OutlineVariant
+    cardStroke.Thickness = 1
+    cardStroke.Parent = card
+
+    local titleLabel = Instance.new("TextLabel")
+    titleLabel.Text = titleText
+    titleLabel.Font = M3.CurrentTheme.FontBold
+    titleLabel.TextSize = 18
+    titleLabel.TextColor3 = M3.CurrentTheme.OnSurface
+    titleLabel.Position = UDim2.new(0, 20, 0, 16)
+    titleLabel.Size = UDim2.new(1, -40, 0, 26)
+    titleLabel.BackgroundTransparency = 1
+    titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+    titleLabel.ZIndex = 1001
+    titleLabel.Parent = card
+
+    local content = Instance.new("TextLabel")
+    content.Text = contentText
+    content.Font = M3.CurrentTheme.Font
+    content.TextSize = 13
+    content.TextColor3 = M3.CurrentTheme.OnSurfaceVariant
+    content.Position = UDim2.new(0, 20, 0, 46)
+    content.Size = UDim2.new(1, -40, 0, 40)
+    content.BackgroundTransparency = 1
+    content.TextWrapped = true
+    content.TextXAlignment = Enum.TextXAlignment.Left
+    content.TextYAlignment = Enum.TextYAlignment.Top
+    content.ZIndex = 1001
+    content.Parent = card
+
+    -- buttons
+    local btnContainer = Instance.new("Frame")
+    btnContainer.Size = UDim2.new(1, -20, 0, 34)
+    btnContainer.Position = UDim2.new(0, 10, 1, -44)
+    btnContainer.BackgroundTransparency = 1
+    btnContainer.ZIndex = 1001
+    btnContainer.Parent = card
+
+    local btnLayout = Instance.new("UIListLayout")
+    btnLayout.FillDirection = Enum.FillDirection.Horizontal
+    btnLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
+    btnLayout.Padding = UDim.new(0, 8)
+    btnLayout.Parent = btnContainer
+
+    local dialogId = tostring(os.clock())
+    local cardH = 120
+    local function closeDialog()
+        M3.Dialogs[dialogId] = nil
+        M3:Tween(card, 0.25, Enum.EasingStyle.Quart, Enum.EasingDirection.In, {
+            BackgroundTransparency = 1
+        })
+        M3:Tween(dim, 0.25, Enum.EasingStyle.Quart, Enum.EasingDirection.In, {
+            BackgroundTransparency = 1
+        })
+        task.delay(0.26, function()
+            if root and root.Parent then root:Destroy() end
+        end)
+    end
+
+    for i, btnData in ipairs(buttons) do
+        local isTable = type(btnData) == "table"
+        local text = isTable and (btnData.Text or "Button") or tostring(btnData)
+        local isPrimary = isTable and btnData.Primary or i == #buttons
+
+        local btn = Instance.new("TextButton")
+        btn.Size = UDim2.new(0, 90, 1, 0)
+        btn.BackgroundColor3 = isPrimary and M3.CurrentTheme.PrimaryContainer or M3.CurrentTheme.SurfaceContainerHigh
+        btn.TextColor3 = isPrimary and M3.CurrentTheme.OnPrimaryContainer or M3.CurrentTheme.OnSurfaceVariant
+        btn.Font = M3.CurrentTheme.FontBold
+        btn.TextSize = 13
+        btn.Text = text
+        btn.ZIndex = 1002
+        btn.Parent = btnContainer
+
+        local btnCorner = Instance.new("UICorner")
+        btnCorner.CornerRadius = UDim.new(0, 8)
+        btnCorner.Parent = btn
+        M3:PressMorph(btnCorner, UDim.new(0, 8), btn)
+
+        local idx = i
+        btn.MouseButton1Click:Connect(function()
+            closeDialog()
+            if callback then
+                pcall(callback, idx, btnData)
+            end
+        end)
+    end
+
+    M3.Dialogs[dialogId] = { Root = root, Card = card }
+    M3:AnimateWindowResize(card, UDim2.new(0, 320, 0, cardH), 0.3)
+
+    return {
+        Close = closeDialog
+    }
+end
+
+-- Ensure single instance: if a marker with 'scriptName' is already running, show a dialog
+-- asking what to do. 'callback' is invoked with true when the caller may proceed.
+M3.RegisteredMarkers = M3.RegisteredMarkers or {}
+
+function M3.EnsureSingleInstance(scriptName, callback)
+    local markerName = "M3_Running_" .. tostring(scriptName)
+
+    local function register()
+        local handle = { Registered = true }
+        _G[markerName] = handle
+        table.insert(M3.RegisteredMarkers, markerName)
+        return handle
+    end
+
+    local existing = _G[markerName]
+    if not existing then
+        -- No instance running: register and proceed
+        local h = register()
+        if callback then callback(true) end
+        return h
+    end
+
+    -- Another instance detected: ask the user
+    M3:ShowDialog({
+        Title = scriptName .. " уже запущен",
+        Content = "Скрипт уже работает. Что сделать?",
+        Buttons = {
+            { Text = "Отмена", Primary = false },
+            { Text = "Запустить отдельно", Primary = false },
+            { Text = "Удалить старый и запустить", Primary = true },
+        },
+        Callback = function(idx)
+            if idx == 2 then
+                -- Run separately: allow a second instance
+                register()
+                if callback then callback(true) end
+            elseif idx == 3 then
+                -- Kill old instance then proceed
+                if existing.Cleanup and type(existing.Cleanup) == "function" then
+                    pcall(existing.Cleanup)
+                end
+                register()
+                if callback then callback(true) end
+            else
+                -- Cancel
+                if callback then callback(false) end
+            end
+        end
+    })
+    return existing
+end
+
 -- Notification holder: bottom-right, stacked manually (dynamic-island style).
 local NotificationHolder = Instance.new("Frame")
 NotificationHolder.Name = "M3_NotificationHolder"
@@ -501,7 +978,10 @@ function M3:Notify(options)
     local titleText = options.Title or "Notification"
     local contentText = options.Content or ""
     local displayMs = options.Duration or 5000
-    local iconId = M3:LoadIcon(options.Icon or "")
+    local iconId = M3:LoadIcon(options.Icon and options.Icon ~= "" and options.Icon or "bell")
+    if iconId == "" then
+        iconId = M3:LoadIcon("bell")
+    end
     local buttons = options.Buttons or {}
     local autoHide = displayMs ~= nil and displayMs > 0 or false
 
@@ -1135,12 +1615,47 @@ function M3:CreateWindow(config)
         wallpaperLabel.ImageTransparency = transparency or 0.85
     end
 
+    local windowVisible = true
     function WindowAPI:SetVisible(visible)
-        mainFrame.Visible = visible
+        visible = visible ~= false
+        if visible == windowVisible then return end
+        windowVisible = visible
+
+        if visible then
+            -- Capture the real target size before we shrink it
+            local targetSize = mainFrame.AbsoluteSize
+            if targetSize.X <= 0 then targetSize = mainFrame.Size end
+            mainFrame.Visible = true
+
+            -- Quick shrink to a fraction, then expand to full size (unfold effect)
+            local absPos = mainFrame.AbsolutePosition
+            local cx = absPos.X + targetSize.X / 2
+            local cy = absPos.Y + targetSize.Y / 2
+            local sx, sy = targetSize.X * 0.6, targetSize.Y * 0.6
+            mainFrame.Size = UDim2.new(0, sx, 0, sy)
+            mainFrame.Position = UDim2.new(0, cx - sx / 2, 0, cy - sy / 2)
+            task.delay(0.03, function()
+                if not windowVisible then return end
+                if mainFrame and mainFrame.Parent then
+                    M3:AnimateWindowResize(mainFrame, UDim2.new(0, targetSize.X, 0, targetSize.Y), 0.4)
+                end
+            end)
+        else
+            local w = mainFrame.AbsoluteSize.X
+            local h = mainFrame.AbsoluteSize.Y
+            if w > 0 and h > 0 then
+                M3:AnimateWindowResize(mainFrame, UDim2.new(0, w * 0.7, 0, h * 0.7), 0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.In)
+            end
+            task.delay(0.32, function()
+                if mainFrame and mainFrame.Parent then
+                    mainFrame.Visible = false
+                end
+            end)
+        end
     end
 
     function WindowAPI:GetVisible()
-        return mainFrame.Visible
+        return windowVisible
     end
 
     function WindowAPI:Destroy()
@@ -2248,6 +2763,15 @@ function M3:CreateWindow(config)
         return TabAPI
     end
 
+    -- Entrance animation: the freshly created window unfolds from the center
+    if config.AnimateIn ~= false then
+        task.delay(0.1, function()
+            if mainFrame and mainFrame.Parent then
+                M3:WindowEntrance(mainFrame, defaultSize, 0.5)
+            end
+        end)
+    end
+
     return WindowAPI
 end
 
@@ -2423,6 +2947,13 @@ function M3:Cleanup()
     M3.FloatingWindows = {}
     M3.ActiveNotifs = {}
     M3.IsHidden = false
+
+    -- Clear single-instance markers registered through M3.EnsureSingleInstance
+    for _, m in ipairs(M3.RegisteredMarkers or {}) do
+        _G[m] = nil
+    end
+    M3.RegisteredMarkers = {}
+
     if ScreenGui then
         ScreenGui:Destroy()
     end
